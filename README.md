@@ -18,8 +18,11 @@ Training data in `data/` was generated with `n_theta=20000`, `n_rep=600`, `R=120
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
 pip install -e ".[jags]"
 ```
+
+Use the `cu126` wheel above for Pascal GPUs (e.g. GTX 1080 Ti). A default `pip install torch` may install a build that drops sm_61 and silently falls back to CPU.
 
 **External:**
 

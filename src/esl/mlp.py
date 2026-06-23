@@ -1,6 +1,7 @@
 """Neural network architectures for multivariate emulator training."""
 
 import os
+import sys
 
 import torch
 import torch.nn as nn
@@ -28,11 +29,20 @@ def _select_device() -> torch.device:
     if os.environ.get("CUDA_VISIBLE_DEVICES", None) == "":
         del os.environ["CUDA_VISIBLE_DEVICES"]
     if not torch.cuda.is_available():
+        print("[mlp] CUDA not available; training on CPU.")
         return torch.device("cpu")
     try:
         torch.zeros(1, device="cuda")
+        name = torch.cuda.get_device_name(0)
+        print(f"[mlp] Using CUDA device: {name}")
         return torch.device("cuda")
-    except Exception:
+    except Exception as exc:
+        print(
+            "[mlp] CUDA is visible but unusable; training on CPU. "
+            f"({exc}). For GTX 1080 Ti / sm_61 GPUs install torch 2.6+cu126: "
+            "pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126",
+            file=sys.stderr,
+        )
         return torch.device("cpu")
 
 
