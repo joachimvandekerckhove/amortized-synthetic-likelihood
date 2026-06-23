@@ -10,7 +10,7 @@ SLUG = "ddm4mv"
 
 
 def main() -> None:
-    steps = ("generate-data", "train-emulator")
+    steps = ("generate-data", "train-emulator", "wire-to-jags", "confirm-recovery")
     if len(sys.argv) != 2 or sys.argv[1] not in steps:
         print(f"Usage: {sys.argv[0]} <{'|'.join(steps)}>", file=sys.stderr)
         sys.exit(1)
@@ -26,6 +26,14 @@ def main() -> None:
         from esl.train_mv import train_emulator_mv
 
         train_emulator_mv(SLUG)
+    elif step == "wire-to-jags":
+        from esl.wire import wire_to_jags
+
+        wire_to_jags(SLUG)
+    elif step == "confirm-recovery":
+        from esl.recovery_mv import run_recovery_study_mv
+
+        run_recovery_study_mv(SLUG)
 
 
 if __name__ == "__main__":
