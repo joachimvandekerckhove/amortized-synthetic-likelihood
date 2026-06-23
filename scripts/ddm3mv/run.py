@@ -10,14 +10,22 @@ SLUG = "ddm3mv"
 
 
 def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] != "generate-data":
-        print(f"Usage: {sys.argv[0]} generate-data", file=sys.stderr)
+    steps = ("generate-data", "train-emulator")
+    if len(sys.argv) != 2 or sys.argv[1] not in steps:
+        print(f"Usage: {sys.argv[0]} <{'|'.join(steps)}>", file=sys.stderr)
         sys.exit(1)
 
     register(DDM3MV)
-    from esl.cov_data import generate_cov_dataset
+    step = sys.argv[1]
 
-    generate_cov_dataset(SLUG)
+    if step == "generate-data":
+        from esl.cov_data import generate_cov_dataset
+
+        generate_cov_dataset(SLUG)
+    elif step == "train-emulator":
+        from esl.train_mv import train_emulator_mv
+
+        train_emulator_mv(SLUG)
 
 
 if __name__ == "__main__":
