@@ -1,0 +1,263 @@
+"""
+esl.cov_data -- Replicate-based per-trial covariance training data for MV models.
+
+For each parameter draw theta, simulates R replicate datasets at n_rep trials,
+computes log1p-space summary means and per-trial covariances, and streams rows
+to data/<slug>/cov_train.csv.
+
+Usage:
+    python -m esl.cov_data <slug>
+
+Environment variables:
+    ESL_SMOKE       If "1", uses small-scale settings.
+    ESL_N_THETA     Number of parameter draws (default 20000 full, 800 smoke).
+    ESL_N_REP       Trials per replicate (default 600 full, 300 smoke).
+    ESL_R           Number of replicates per theta (default 120 full, 40 smoke).
+    ESL_SEED        Global seed for parameter sampling.
+    ESL_WORKERS     Parallel workers (default: 90% of CPU count).
+"""
+
+import os
+import sys
+import json
+from multiprocessing import Pool, cpu_count
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from esl.data import summary_column_masks
+from esl.mv import pack_upper_tri, upper_tri_index_pairs
+from esl.registry import get_model
+from esl.spec import Model
+
+SEED_DEFAULT = 42
+N_THETA_FULL = 20_000
+N_THETA_SMOKE = 800
+N_REP_FULL = 600
+N_REP_SMOKE = 300
+R_FULL = 120
+R_SMOKE = 40
+CHUNK_SIZE = 200
+
+
+def cov_settings_path(slug: str) -> Path:
+    """Path to metadata describing how cov_train.csv was generated."""
+    return Path("data") / slug / "cov_settings.json"
+
+
+def save_cov_settings(slug: str, n_rep: int, n_replicates: int, seed: int) -> None:
+    """Persist replicate counts used to build cov_train.csv."""
+    path = cov_settings_path(slug)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(
+            {"n_rep": n_rep, "R": n_replicates, "seed": seed},
+            f,
+            indent=2,
+        )
+
+
+def load_cov_settings(slug: str) -> tuple[int, int]:
+    """Return (n_rep, R) used for cov_train.csv."""
+    path = cov_settings_path(slug)
+    if path.exists():
+        with open(path) as f:
+            payload = json.load(f)
+        return int(payload["n_rep"]), int(payload["R"])
+    return N_REP_FULL, R_FULL
+
+
+def resolve_cov_settings() -> tuple[int, int, int, int]:
+    """Return n_theta, n_rep, R, seed from environment."""
+    is_smoke = os.environ.get("ESL_SMOKE", "0") == "1"
+    if is_smoke:
+        default_theta = N_THETA_SMOKE
+        default_rep = N_REP_SMOKE
+        default_r = R_SMOKE
+    else:
+        default_theta = N_THETA_FULL
+        default_rep = N_REP_FULL
+        default_r = R_FULL
+    n_theta = int(os.environ.get("ESL_N_THETA", default_theta))
+    n_rep = int(os.environ.get("ESL_N_REP", default_rep))
+    n_r = int(os.environ.get("ESL_R", default_r))
+    seed = int(os.environ.get("ESL_SEED", SEED_DEFAULT))
+    return n_theta, n_rep, n_r, seed
+
+
+def c1_column_names(n_summaries: int) -> list[str]:
+    """Column names for upper-triangular per-trial covariance entries."""
+    return [f"c1_{i}_{j}" for i, j in upper_tri_index_pairs(n_summaries)]
+
+
+def z_mean_column_names(summary_names: tuple[str, ...]) -> list[str]:
+    """Column names for log1p-space summary means."""
+    return [f"z_mean_{name}" for name in summary_names]
+
+
+def draw_parameters(model: Model, rng: np.random.Generator) -> np.ndarray:
+    """Draw one parameter vector uniformly within model bounds."""
+    params = np.empty(model.n_params)
+    for i, (lo, hi) in enumerate(model.param_bounds):
+        params[i] = rng.uniform(lo, hi)
+    return params
+
+
+def summaries_to_logspace(summaries: np.ndarray, rt_mask: np.ndarray) -> np.ndarray:
+    """Apply log1p to RT summary columns."""
+    z = summaries.copy()
+    z[rt_mask] = np.log1p(z[rt_mask])
+    return z
+
+
+def logspace_to_raw(z_mean: np.ndarray, rt_mask: np.ndarray) -> np.ndarray:
+    """Invert log1p on RT columns for R^2 evaluation in physical units."""
+    y_raw = z_mean.copy()
+    y_raw[rt_mask] = np.expm1(y_raw[rt_mask])
+    return y_raw
+
+
+def _simulate_one_theta(args: tuple) -> np.ndarray | None:
+    """Worker: simulate R replicates and return one cov_train row or None."""
+    slug, params, n_rep, n_r, base_seed = args
+    model = get_model(slug)
+    rt_mask, _ = summary_column_masks(model)
+    n_summaries = model.n_summaries
+
+    if n_r < 2:
+        return None
+
+    replicates = np.empty((n_r, n_summaries), dtype=np.float64)
+    for r in range(n_r):
+        summaries = model.simulate_summaries(params, n_rep, base_seed + r)
+        if not np.all(np.isfinite(summaries)):
+            return None
+        replicates[r] = summaries_to_logspace(summaries, rt_mask)
+
+    z_mean = replicates.mean(axis=0)
+    C1_z = n_rep * np.cov(replicates, rowvar=False, bias=False)
+    if not np.all(np.isfinite(C1_z)):
+        return None
+
+    return np.concatenate([params, z_mean, pack_upper_tri(C1_z)])
+
+
+def expected_columns(model: Model) -> list[str]:
+    """Return the ordered column names for cov_train.csv."""
+    return (
+        list(model.param_names)
+        + z_mean_column_names(model.summary_names)
+        + c1_column_names(model.n_summaries)
+    )
+
+
+def generate_cov_dataset(slug: str) -> None:
+    """Generate replicate-based covariance training data for a multivariate model."""
+    model = get_model(slug)
+    n_theta, n_rep, n_r, seed = resolve_cov_settings()
+    n_workers = int(os.environ.get("ESL_WORKERS", max(1, int(cpu_count() * 0.9))))
+
+    output_dir = Path("data") / slug
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "cov_train.csv"
+
+    print(f"[cov_data] Model: {slug}")
+    print(
+        f"[cov_data] Target theta: {n_theta}, n_rep: {n_rep}, R: {n_r}, seed: {seed}"
+    )
+    print(f"[cov_data] Workers: {n_workers}")
+    print(f"[cov_data] Output: {output_path}")
+
+    param_rng = np.random.default_rng(seed)
+    all_params = [draw_parameters(model, param_rng) for _ in range(n_theta)]
+    work_items = [
+        (slug, all_params[i], n_rep, n_r, seed + 10_000 + i * n_r)
+        for i in range(n_theta)
+    ]
+
+    columns = expected_columns(model)
+    valid_rows: list[np.ndarray] = []
+    report_interval = max(1, n_theta // 20)
+    processed = 0
+
+    with Pool(processes=n_workers) as pool:
+        for result in pool.imap_unordered(
+            _simulate_one_theta, work_items, chunksize=CHUNK_SIZE
+        ):
+            processed += 1
+            if result is not None:
+                valid_rows.append(result)
+
+            if processed % report_interval == 0:
+                pct = 100 * processed / n_theta
+                print(
+                    f"[cov_data] {pct:.0f}% processed, {len(valid_rows)} valid rows"
+                )
+
+    print(f"[cov_data] Writing {len(valid_rows)} valid rows to {output_path}")
+    df = pd.DataFrame(valid_rows, columns=columns)
+    df.to_csv(output_path, index=False)
+    save_cov_settings(slug, n_rep, n_r, seed)
+    print(f"[cov_data] Done. {len(valid_rows)} valid rows written.")
+
+    if len(valid_rows) == 0:
+        print("[cov_data] FAIL: No valid rows produced.", file=sys.stderr)
+        sys.exit(1)
+
+
+def load_cov_dataset(
+    slug: str, subsample: int | None = None, seed: int = 42
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Model]:
+    """Load cov_train.csv and return arrays for multivariate training.
+
+    Returns
+    -------
+    X : np.ndarray of shape (n_rows, n_params)
+    z_mean : np.ndarray of shape (n_rows, n_summaries), log1p space
+    C1_z : np.ndarray of shape (n_rows, n_chol), per-trial cov in log1p space
+    y_raw : np.ndarray of shape (n_rows, n_summaries), physical units for R^2
+    model : Model
+    """
+    model = get_model(slug)
+    data_path = Path("data") / slug / "cov_train.csv"
+    if not data_path.exists():
+        raise FileNotFoundError(f"Covariance training data not found: {data_path}")
+
+    df = pd.read_csv(data_path)
+    expected_cols = expected_columns(model)
+    if list(df.columns) != expected_cols:
+        raise ValueError(
+            f"Unexpected columns in {data_path}. "
+            f"Expected {expected_cols}, got {list(df.columns)}"
+        )
+
+    mask = np.isfinite(df.values).all(axis=1)
+    df = df.loc[mask].reset_index(drop=True)
+
+    if subsample is not None and len(df) > subsample:
+        rng = np.random.default_rng(seed)
+        indices = rng.choice(len(df), size=subsample, replace=False)
+        df = df.iloc[indices].reset_index(drop=True)
+
+    rt_mask, _ = summary_column_masks(model)
+    z_cols = z_mean_column_names(model.summary_names)
+    c1_cols = c1_column_names(model.n_summaries)
+
+    X = df[list(model.param_names)].values.astype(np.float32)
+    z_mean = df[z_cols].values.astype(np.float32)
+    C1_z = df[c1_cols].values.astype(np.float32)
+    y_raw = np.array([logspace_to_raw(row, rt_mask) for row in z_mean], dtype=np.float32)
+    return X, z_mean, C1_z, y_raw, model
+
+
+def main() -> None:
+    """Entry point for python -m esl.cov_data <slug>."""
+    if len(sys.argv) != 2:
+        print("Usage: python -m esl.cov_data <model-slug>", file=sys.stderr)
+        sys.exit(1)
+    generate_cov_dataset(sys.argv[1])
+
+
+if __name__ == "__main__":
+    main()

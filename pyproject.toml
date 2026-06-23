@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "esl"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "onnx",
+    "onnxruntime",
+    "torch",
+]
+
+[project.optional-dependencies]
+jags = ["py2jags @ git+https://github.com/joachimvandekerckhove/py2jags.git"]
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["esl*", "models*"]
