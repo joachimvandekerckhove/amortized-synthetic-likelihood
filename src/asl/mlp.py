@@ -6,6 +6,8 @@ import sys
 import torch
 import torch.nn as nn
 
+from asl.config import load_config
+
 
 class DeepWideMLP(nn.Module):
     """Multi-layer perceptron with BatchNorm and GELU activations."""
@@ -23,11 +25,15 @@ class DeepWideMLP(nn.Module):
     def forward(self, x):
         return self.head(self.backbone(x))
 
+    def count_trainable_parameters(self) -> int:
+        """Count trainable parameters in this network."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
 
 def _select_device() -> torch.device:
     """Select the best available compute device."""
-    if os.environ.get("CUDA_VISIBLE_DEVICES", None) == "":
-        del os.environ["CUDA_VISIBLE_DEVICES"]
+    if load_config().get("device", "unset_cuda_visible_devices", False):
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
     if not torch.cuda.is_available():
         print("[mlp] CUDA not available; training on CPU.")
         return torch.device("cpu")
@@ -49,22 +55,14 @@ def _select_device() -> torch.device:
 DEVICE = _select_device()
 
 
-def count_parameters(model: nn.Module) -> int:
-    """Count trainable parameters in a PyTorch model."""
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-
 def resolve_training_settings() -> dict:
-    """Resolve training hyperparameters from environment."""
-    is_smoke = os.environ.get("ESL_SMOKE", "0") == "1"
-    n_epochs = 300 if is_smoke else 10000
-    if "ESL_N_EPOCHS" in os.environ:
-        n_epochs = int(os.environ["ESL_N_EPOCHS"])
+    """Resolve training hyperparameters from TOML configuration."""
+    config = load_config()
     return {
-        "subsample": 5000 if is_smoke else None,
-        "n_epochs": n_epochs,
-        "batch_size": 512 if is_smoke else 4096,
-        "lr": 1e-3,
+        "subsample": config.get("training", "max_training_rows"),
+        "n_epochs": int(config.get("training", "training_epochs")),
+        "batch_size": int(config.get("training", "batch_size")),
+        "lr": float(config.get("training", "learning_rate")),
     }
 
 

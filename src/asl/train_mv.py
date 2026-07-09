@@ -1,7 +1,6 @@
 """Multivariate emulator training (dual-head, covariance-aware)."""
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -11,11 +10,16 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-from esl.cov_data import load_cov_dataset, load_cov_settings
-from esl.data import TargetTransform, save_target_transform, summary_column_masks
-from esl.export_mv import export_mv_onnx
-from esl.mlp import DEVICE, build_architecture, count_parameters, resolve_training_settings
-from esl.mv import (
+from asl.config import load_config
+from asl.cov_data import load_cov_dataset, load_cov_settings
+from asl.data import TargetTransform, save_target_transform, summary_column_masks
+from asl.export_mv import export_mv_onnx
+from asl.mlp import (
+    DEVICE,
+    build_architecture,
+    resolve_training_settings,
+)
+from asl.mv import (
     cov_stein_loss,
     debias_emulator_error_cov,
     n_chol,
@@ -23,7 +27,7 @@ from esl.mv import (
     std_cov_from_logcov,
     unpack_upper_tri,
 )
-from esl.registry import get_model
+from asl.registry import get_model
 
 COV_LAMBDA = 1.0
 
@@ -42,6 +46,10 @@ class DualHeadNet(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         features = self.feature_extractor(x)
         return self.mean_head(features), self.chol_head(features)
+
+    def count_trainable_parameters(self) -> int:
+        """Count trainable parameters in this network."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
 def build_target_transform(rt_mask: np.ndarray, z_mean: np.ndarray) -> TargetTransform:
@@ -195,14 +203,17 @@ def retrain_dual_head_model(
 
 def train_emulator_mv(slug: str) -> None:
     """Train a fixed-architecture dual-head emulator and export ONNX."""
+    config = load_config()
     model = get_model(slug)
     settings = resolve_training_settings()
-    if model.default_n_epochs is not None and "ESL_N_EPOCHS" not in os.environ:
+    if model.default_n_epochs is not None and not config.has("training", "training_epochs"):
         settings = {**settings, "n_epochs": model.default_n_epochs}
     rt_mask, _ = summary_column_masks(model)
-    cov_lambda = float(os.environ.get("ESL_COV_LAMBDA", COV_LAMBDA))
+    cov_lambda = float(
+        config.get("training", "covariance_loss_weight", COV_LAMBDA)
+    )
 
-    arch_name = os.environ.get("ESL_ARCHITECTURE") or model.default_architecture
+    arch_name = config.get("training", "architecture") or model.default_architecture
     if not arch_name:
         print("[train_mv] FAIL: No architecture specified.", file=sys.stderr)
         sys.exit(1)
@@ -277,7 +288,7 @@ def train_emulator_mv(slug: str) -> None:
         "per_target_r2": per_target_r2.tolist(),
         "cov_stein_loss": cov_stein,
         "cov_lambda": cov_lambda,
-        "n_params": count_parameters(final_net),
+        "n_params": final_net.count_trainable_parameters(),
         "summary_names": list(model.summary_names),
         "output_names": list(model.output_names),
     }
@@ -289,11 +300,7 @@ def train_emulator_mv(slug: str) -> None:
     save_target_transform(slug, target_transform)
     print(f"[train_mv] Exported ONNX: {onnx_path}")
 
-    is_smoke = os.environ.get("ESL_SMOKE", "0") == "1"
-    if "ESL_MV_R2_GATE" in os.environ:
-        threshold = float(os.environ["ESL_MV_R2_GATE"])
-    else:
-        threshold = 0.995 if is_smoke else 0.999
+    threshold = float(config.get("training", "mean_r2_threshold"))
     if overall_r2 < threshold:
         print(
             f"[train_mv] FAIL: Overall mean-head R^2 = {overall_r2:.6f} < {threshold}",

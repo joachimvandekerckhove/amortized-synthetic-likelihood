@@ -1,7 +1,10 @@
 """Recovery study helpers shared by scalar and multivariate pipelines."""
 
-import os
+import sys
 import time
+from multiprocessing import cpu_count
+
+from asl.config import load_config
 
 N_CHAINS = 4
 N_SUBJECTS_FULL = 500
@@ -51,15 +54,15 @@ def format_recovery_progress(
 
 def recovery_report_interval(n_subjects: int) -> int:
     """Subjects between progress reports (default: every 10)."""
-    if "ESL_PROGRESS_EVERY" in os.environ:
-        return max(1, int(os.environ["ESL_PROGRESS_EVERY"]))
+    config = load_config()
+    progress_every = int(config.get("recovery", "progress_log_interval", 0))
+    if progress_every > 0:
+        return max(1, progress_every)
     return max(1, min(10, n_subjects // 50))
 
 
 def check_coverage_gate(coverages: list[float], param_names: tuple[str, ...]) -> None:
     """Exit non-zero if any parameter coverage is outside (LO, HI)."""
-    import sys
-
     for i, name in enumerate(param_names):
         cov = coverages[i]
         if cov <= COVERAGE_LO or cov >= COVERAGE_HI:
@@ -72,19 +75,26 @@ def check_coverage_gate(coverages: list[float], param_names: tuple[str, ...]) ->
             sys.exit(1)
 
 
+def resolve_recovery_workers(n_chains: int) -> int:
+    """Return parallel worker count from TOML or CPU default."""
+    config = load_config()
+    workers = int(config.get("recovery", "parallel_workers", 0))
+    if workers > 0:
+        return max(1, workers)
+    return max(1, int(cpu_count() * 0.9) // n_chains)
+
+
 def resolve_recovery_settings() -> dict:
-    """Determine recovery study size from environment."""
-    is_smoke = os.environ.get("ESL_SMOKE", "0") == "1"
-    n_subjects = N_SUBJECTS_SMOKE if is_smoke else N_SUBJECTS_FULL
-    n_trials = N_TRIALS_RECOVERY_SMOKE if is_smoke else N_TRIALS_RECOVERY_FULL
-    if "ESL_N_SUBJECTS" in os.environ:
-        n_subjects = int(os.environ["ESL_N_SUBJECTS"])
-    if "ESL_N_TRIALS" in os.environ:
-        n_trials = int(os.environ["ESL_N_TRIALS"])
+    """Determine recovery study size from TOML configuration."""
+    config = load_config()
     return {
-        "n_subjects": n_subjects,
-        "n_trials": n_trials,
-        "n_iter": N_MCMC_ITER_SMOKE if is_smoke else N_MCMC_ITER_FULL,
-        "n_burnin": N_BURNIN_SMOKE if is_smoke else N_BURNIN_FULL,
+        "n_subjects": int(
+            config.get("recovery", "synthetic_subjects", N_SUBJECTS_FULL)
+        ),
+        "n_trials": int(
+            config.get("recovery", "trials_per_subject", N_TRIALS_RECOVERY_FULL)
+        ),
+        "n_iter": N_MCMC_ITER_SMOKE if config.smoke else N_MCMC_ITER_FULL,
+        "n_burnin": N_BURNIN_SMOKE if config.smoke else N_BURNIN_FULL,
         "n_chains": N_CHAINS,
     }

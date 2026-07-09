@@ -1,35 +1,32 @@
 """
-esl.cov_data -- Replicate-based per-trial covariance training data for MV models.
+asl.cov_data -- Replicate-based per-trial covariance training data for MV models.
 
 For each parameter draw theta, simulates R replicate datasets at n_rep trials,
 computes log1p-space summary means and per-trial covariances, and streams rows
 to data/<slug>/cov_train.csv.
 
 Usage:
-    python -m esl.cov_data <slug>
+    Called from scripts/<model>/run.py generate-data
 
-Environment variables:
-    ESL_SMOKE       If "1", uses small-scale settings.
-    ESL_N_THETA     Number of parameter draws (default 20000 full, 800 smoke).
-    ESL_N_REP       Trials per replicate (default 600 full, 300 smoke).
-    ESL_R           Number of replicates per theta (default 120 full, 40 smoke).
-    ESL_SEED        Global seed for parameter sampling.
-    ESL_WORKERS     Parallel workers (default: 90% of CPU count).
+Configuration:
+    [run] smoke in asl.toml; presets in src/asl/presets/
+    [cov_data] parameter_draws, trials_per_replicate, replicates_per_parameter,
+               random_seed, parallel_workers
 """
 
-import os
-import sys
 import json
+import sys
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from esl.data import summary_column_masks
-from esl.mv import pack_upper_tri, upper_tri_index_pairs
-from esl.registry import get_model
-from esl.spec import Model
+from asl.config import load_config
+from asl.data import summary_column_masks
+from asl.mv import pack_upper_tri, upper_tri_index_pairs
+from asl.registry import get_model
+from asl.spec import Model
 
 SEED_DEFAULT = 42
 N_THETA_FULL = 20_000
@@ -69,21 +66,22 @@ def load_cov_settings(slug: str) -> tuple[int, int]:
 
 
 def resolve_cov_settings() -> tuple[int, int, int, int]:
-    """Return n_theta, n_rep, R, seed from environment."""
-    is_smoke = os.environ.get("ESL_SMOKE", "0") == "1"
-    if is_smoke:
-        default_theta = N_THETA_SMOKE
-        default_rep = N_REP_SMOKE
-        default_r = R_SMOKE
-    else:
-        default_theta = N_THETA_FULL
-        default_rep = N_REP_FULL
-        default_r = R_FULL
-    n_theta = int(os.environ.get("ESL_N_THETA", default_theta))
-    n_rep = int(os.environ.get("ESL_N_REP", default_rep))
-    n_r = int(os.environ.get("ESL_R", default_r))
-    seed = int(os.environ.get("ESL_SEED", SEED_DEFAULT))
+    """Return n_theta, n_rep, R, seed from TOML configuration."""
+    config = load_config()
+    n_theta = int(config.get("cov_data", "parameter_draws", N_THETA_FULL))
+    n_rep = int(config.get("cov_data", "trials_per_replicate", N_REP_FULL))
+    n_r = int(config.get("cov_data", "replicates_per_parameter", R_FULL))
+    seed = int(config.get("cov_data", "random_seed", SEED_DEFAULT))
     return n_theta, n_rep, n_r, seed
+
+
+def resolve_cov_workers() -> int:
+    """Return parallel worker count from TOML or CPU default."""
+    config = load_config()
+    workers = int(config.get("cov_data", "parallel_workers", 0))
+    if workers > 0:
+        return workers
+    return max(1, int(cpu_count() * 0.9))
 
 
 def c1_column_names(n_summaries: int) -> list[str]:
@@ -156,7 +154,7 @@ def generate_cov_dataset(slug: str) -> None:
     """Generate replicate-based covariance training data for a multivariate model."""
     model = get_model(slug)
     n_theta, n_rep, n_r, seed = resolve_cov_settings()
-    n_workers = int(os.environ.get("ESL_WORKERS", max(1, int(cpu_count() * 0.9))))
+    n_workers = resolve_cov_workers()
 
     output_dir = Path("data") / slug
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -249,15 +247,3 @@ def load_cov_dataset(
     C1_z = df[c1_cols].values.astype(np.float32)
     y_raw = np.array([logspace_to_raw(row, rt_mask) for row in z_mean], dtype=np.float32)
     return X, z_mean, C1_z, y_raw, model
-
-
-def main() -> None:
-    """Entry point for python -m esl.cov_data <slug>."""
-    if len(sys.argv) != 2:
-        print("Usage: python -m esl.cov_data <model-slug>", file=sys.stderr)
-        sys.exit(1)
-    generate_cov_dataset(sys.argv[1])
-
-
-if __name__ == "__main__":
-    main()

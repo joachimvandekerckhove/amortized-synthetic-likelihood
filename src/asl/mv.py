@@ -1,8 +1,8 @@
 """
-esl.mv -- Shared helpers for multivariate emulator training and JAGS wiring.
+asl.mv -- Shared helpers for multivariate emulator training and JAGS wiring.
 
 Defines the Cholesky upper-triangular layout used consistently by train_mv,
-export_mv, and the JAGS likelihood generator in multivariate model files.
+export_mv, and the JAGS synthetic-likelihood nodes in multivariate model files.
 """
 
 import json
@@ -103,44 +103,38 @@ def cov_stein_loss(
     return torch.mean(trace_term - logdet)
 
 
-def build_mv_jags_likelihood_lines(n_summaries: int) -> list[str]:
-    """Generate JAGS lines for N-agnostic multivariate normal likelihood.
+def build_sl_likelihood_line(
+    slug: str,
+    param_names: tuple[str, ...] | list[str],
+    n_summaries: int,
+    *,
+    obs_name: str = "obs_std",
+    n_trials_name: str = "n_trials",
+) -> list[str]:
+    """One-line JNNX v1.1 synthetic likelihood for standardized summaries."""
+    args = ", ".join(param_names)
+    dist = f"{slug}_sl"
+    return [f"{obs_name}[1:{n_summaries}] ~ {dist}({args}, {n_trials_name})"]
 
-    The emulator predicts per-trial precision Omega1 = L^T L.  At inference:
 
-        Sigma_sampling = inverse(n_trials * Omega1)
-        Sigma_total = Sigma_sampling + sigma_emu
-        obs_std ~ dmnorm(mu_std(theta), inverse(Sigma_total))
-
-    n_trials and sigma_emu[1:n,1:n] must be present in the JAGS data dictionary.
-    """
-    n = n_summaries
-    pairs = upper_tri_index_pairs(n)
-    lines = []
-
-    for k, (i, j) in enumerate(pairs):
-        lines.append(f"L[{i + 1},{j + 1}] <- pred[{n + k + 1}]")
-
-    for i in range(n):
-        for j in range(i):
-            lines.append(f"L[{i + 1},{j + 1}] <- 0")
-
-    lines.append(
-        f"for (ii in 1:{n}) {{ for (jj in 1:{n}) {{ "
-        f"Omega1[ii,jj] <- inprod(L[1:{n},ii], L[1:{n},jj]) }} }}"
+def build_mv_jags_likelihood_for_model(
+    slug: str,
+    param_names: tuple[str, ...],
+    n_summaries: int,
+    obs: dict | None = None,
+    *,
+    obs_name: str = "obs_std",
+    n_trials_name: str = "n_trials",
+) -> list[str]:
+    """Return synthetic-likelihood lines for one emulator."""
+    del obs  # reserved for condition-specific hooks
+    return build_sl_likelihood_line(
+        slug,
+        param_names,
+        n_summaries,
+        obs_name=obs_name,
+        n_trials_name=n_trials_name,
     )
-    lines.append(
-        f"for (ii in 1:{n}) {{ for (jj in 1:{n}) {{ "
-        f"Omega_sampling[ii,jj] <- n_trials * Omega1[ii,jj] }} }}"
-    )
-    lines.append(f"Sigma_sampling[1:{n},1:{n}] <- inverse(Omega_sampling[1:{n},1:{n}])")
-    lines.append(
-        f"for (ii in 1:{n}) {{ for (jj in 1:{n}) {{ "
-        f"Sigma_total[ii,jj] <- Sigma_sampling[ii,jj] + sigma_emu[ii,jj] }} }}"
-    )
-    lines.append(f"Omega_total[1:{n},1:{n}] <- inverse(Sigma_total[1:{n},1:{n}])")
-    lines.append(f"obs_std[1:{n}] ~ dmnorm(pred[1:{n}], Omega_total[1:{n},1:{n}])")
-    return lines
 
 
 def emulator_error_cov_path(slug: str) -> Path:
@@ -199,49 +193,6 @@ def load_emulator_error_cov(slug: str) -> np.ndarray:
     with open(path) as f:
         payload = json.load(f)
     return np.array(payload["sigma_emu"], dtype=np.float64)
-
-
-def raw_tau_to_std_tau(
-    tau_raw: np.ndarray,
-    y_raw: np.ndarray,
-    rt_mask: np.ndarray,
-    scale: np.ndarray,
-) -> np.ndarray:
-    """Convert raw sampling precision to standardized-space precision (legacy ddm4mv)."""
-    tau_raw = np.maximum(tau_raw, 1e-3)
-    tau_std = tau_raw * scale ** 2
-    tau_std[rt_mask] *= (y_raw[rt_mask] + 1.0) ** 2
-    return tau_std
-
-
-def build_mv_jags_likelihood_lines_additive(n_summaries: int) -> list[str]:
-    """Legacy JAGS lines: emulator cov plus diagonal sampling precision (ddm4mv).
-
-    tau_std[1:N] must be present in the JAGS data dictionary.
-    """
-    n = n_summaries
-    pairs = upper_tri_index_pairs(n)
-    lines = []
-
-    for k, (i, j) in enumerate(pairs):
-        lines.append(f"L[{i + 1},{j + 1}] <- pred[{n + k + 1}]")
-
-    for i in range(n):
-        for j in range(i):
-            lines.append(f"L[{i + 1},{j + 1}] <- 0")
-
-    lines.append(
-        f"for (ii in 1:{n}) {{ for (jj in 1:{n}) {{ "
-        f"Omega_emu[ii,jj] <- inprod(L[1:{n},ii], L[1:{n},jj]) }} }}"
-    )
-    lines.append(f"Sigma_emu[1:{n},1:{n}] <- inverse(Omega_emu[1:{n},1:{n}])")
-    lines.append(
-        f"for (ii in 1:{n}) {{ for (jj in 1:{n}) {{ "
-        f"Sigma_total[ii,jj] <- Sigma_emu[ii,jj] + equals(ii,jj)/tau_std[jj] }} }}"
-    )
-    lines.append(f"Omega_total[1:{n},1:{n}] <- inverse(Sigma_total[1:{n},1:{n}])")
-    lines.append(f"obs_std[1:{n}] ~ dmnorm(pred[1:{n}], Omega_total[1:{n},1:{n}])")
-    return lines
 
 
 def emulator_output_names_for(n_summaries: int, summary_names: tuple[str, ...]) -> tuple[str, ...]:

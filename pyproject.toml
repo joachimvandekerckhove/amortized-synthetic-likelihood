@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "esl"
+name = "asl"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
@@ -22,8 +22,13 @@ cuda = [
     # Install with: pip install -e ".[cuda,jags]" --extra-index-url https://download.pytorch.org/whl/cu126
     "torch==2.6.0",
 ]
-jags = ["py2jags @ git+https://github.com/joachimvandekerckhove/py2jags.git"]
+jags = ["py2jags @ git+https://github.com/joachimvandekerckhove/py2jags.git", "jnnx @ git+https://github.com/joachimvandekerckhove/jnnx.git@v1.1.2"]
+dev = ["pytest"]
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
-include = ["esl*", "models*"]
+include = ["asl*", "models*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]

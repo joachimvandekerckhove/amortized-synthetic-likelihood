@@ -1,13 +1,15 @@
 """Multivariate four-parameter DDM emulator."""
 
-from esl.mv import build_mv_jags_likelihood_lines, emulator_output_names_for
-from esl.spec import Model
+from asl.mv import build_mv_jags_likelihood_for_model, emulator_output_names_for
+from asl.spec import Model
 from models.ddm.ddm4 import DDM4, simulate_summaries_ddm4
 
 
 def build_ddm4mv_jags_likelihood(obs: dict) -> list[str]:
     """Return JAGS likelihood lines for ddm4mv recovery."""
-    return build_mv_jags_likelihood_lines(DDM4.n_summaries)
+    return build_mv_jags_likelihood_for_model(
+        "ddm4mv", DDM4.param_names, N_SUMMARIES, obs
+    )
 
 
 N_SUMMARIES = DDM4.n_summaries

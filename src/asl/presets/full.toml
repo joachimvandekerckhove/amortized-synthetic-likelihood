@@ -1,0 +1,18 @@
+# Full-scale preset. Do not edit; override values in asl.toml instead.
+
+[training]
+training_epochs = 10000
+batch_size = 4096
+learning_rate = 0.001
+covariance_loss_weight = 1.0
+mean_r2_threshold = 0.999
+
+[cov_data]
+parameter_draws = 20000
+trials_per_replicate = 600
+replicates_per_parameter = 120
+random_seed = 42
+
+[recovery]
+synthetic_subjects = 500
+trials_per_subject = 500

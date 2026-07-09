@@ -5,7 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from esl.spec import Model
+from asl.spec import Model
 
 
 def plot_recovery_diagnostics(

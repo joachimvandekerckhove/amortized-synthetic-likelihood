@@ -7,8 +7,8 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-from esl.data import TargetTransform, save_target_transform
-from esl.spec import Model
+from asl.data import TargetTransform, save_target_transform
+from asl.spec import Model
 
 
 class ExportMVModel(nn.Module):
@@ -32,7 +32,7 @@ class ExportMVModel(nn.Module):
         x_scaled = (raw_params - self.x_mean) / self.x_scale
         mu_std, chol_raw = self.net(x_scaled)
 
-        from esl.mv import upper_tri_index_pairs
+        from asl.mv import upper_tri_index_pairs
 
         chol_upper = chol_raw.clone()
         for k, (i, j) in enumerate(upper_tri_index_pairs(self.n_summaries)):

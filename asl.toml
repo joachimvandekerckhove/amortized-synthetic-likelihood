@@ -1,0 +1,30 @@
+# User-editable ASL pipeline overrides.
+#
+# Presets live in src/asl/presets/{full,smoke}.toml and are not meant to be
+# edited. Set [run].smoke to choose a preset, then override individual keys here.
+#
+# Scenario-specific overrides can also be layered via ASL_CONFIG:
+#   ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3mv confirm-recovery
+
+[run]
+smoke = false
+
+[wire]
+# Example: onnxruntime_dir = "/opt/onnxruntime"
+onnxruntime_dir = ""
+
+[device]
+# unset_cuda_visible_devices = false
+
+# Optional overrides (uncomment to replace preset values):
+#
+# [training]
+# architecture = "DeepWide_32x6"
+# training_epochs = 10000
+#
+# [cov_data]
+# parallel_workers = 8
+#
+# [recovery]
+# progress_log_interval = 10
+# parallel_workers = 4

@@ -1,13 +1,15 @@
 """Multivariate DDM emulator models."""
 
-from esl.mv import build_mv_jags_likelihood_lines, emulator_output_names_for
-from esl.spec import Model
+from asl.mv import build_mv_jags_likelihood_for_model, emulator_output_names_for
+from asl.spec import Model
 from models.ddm.ddm3 import DDM3, simulate_summaries_ddm3
 
 
 def build_ddm3mv_jags_likelihood(obs: dict) -> list[str]:
     """Return JAGS likelihood lines for ddm3mv recovery."""
-    return build_mv_jags_likelihood_lines(DDM3.n_summaries)
+    return build_mv_jags_likelihood_for_model(
+        "ddm3mv", DDM3.param_names, N_SUMMARIES, obs
+    )
 
 
 N_SUMMARIES = DDM3.n_summaries

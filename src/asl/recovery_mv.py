@@ -1,28 +1,28 @@
 """Multivariate simulate-and-recover study via py2jags."""
 
 import json
-import os
 import sys
 import time
 from itertools import product
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
 from scipy.optimize import minimize
 
-from esl.data import load_target_transform
-from esl.figures import plot_recovery_diagnostics
-from esl.mv import load_emulator_error_cov
-from esl.recovery import (
+from asl.config import load_config
+from asl.data import load_target_transform
+from asl.figures import plot_recovery_diagnostics
+from asl.recovery import (
     check_coverage_gate,
     format_recovery_progress,
     recovery_report_interval,
     resolve_recovery_settings,
+    resolve_recovery_workers,
 )
-from esl.registry import get_model
-from esl.spec import Model
+from asl.registry import get_model
+from asl.spec import Model
 
 N_CHAINS = 4
 
@@ -49,14 +49,10 @@ def build_jags_model_string_mv(model: Model, obs: dict) -> str:
     if not model.supports_mv_recovery():
         raise ValueError(f"Model '{model.slug}' does not define mv recovery hooks.")
 
-    function_name = f"{model.slug}_emulator"
     priors = "\n    ".join(model.recovery_priors.values())
-    param_args = ", ".join(model.param_names)
-
     lines = [
         "model {",
         f"    {priors}",
-        f"    pred[1:{model.n_outputs}] <- {function_name}({param_args})",
     ]
     lines.extend(f"    {line}" for line in model.build_jags_likelihood(obs))
     lines.append("}")
@@ -125,13 +121,13 @@ def compute_mle_initial_values_mv(
 
 def _recover_one_subject_mv(args: tuple) -> dict | None:
     """Worker: run multivariate MCMC for one subject."""
-    slug, true_params, subj_seed, settings, onnx_path_str, sigma_emu_list = args
+    slug, true_params, subj_seed, settings, onnx_path_str = args
     from py2jags import run_jags
 
     model = get_model(slug)
     target_transform = load_target_transform(slug)
     onnx_path = Path(onnx_path_str)
-    function_name = f"{model.slug}_emulator"
+    module_name = f"{model.slug}_emulator"
 
     obs = simulate_subject_observations_mv(
         model, target_transform, true_params, settings["n_trials"], subj_seed
@@ -143,7 +139,6 @@ def _recover_one_subject_mv(args: tuple) -> dict | None:
     data = {
         "obs_std": obs["obs_std"].tolist(),
         "n_trials": settings["n_trials"],
-        "sigma_emu": sigma_emu_list,
     }
     inits = compute_mle_initial_values_mv(model, obs["obs_std"], onnx_path)
 
@@ -157,7 +152,7 @@ def _recover_one_subject_mv(args: tuple) -> dict | None:
             nburnin=settings["n_burnin"],
             thin=2,
             init=inits,
-            modules=[function_name],
+            modules=[module_name],
             parallel=True,
             maxcores=settings["n_chains"],
         )
@@ -207,22 +202,10 @@ def run_recovery_study_mv(slug: str) -> None:
         sys.exit(1)
 
     load_target_transform(slug)
-    try:
-        sigma_emu = load_emulator_error_cov(slug)
-    except FileNotFoundError:
-        print(
-            f"[recovery_mv] FAIL: emulator_error_cov.json not found for {slug}.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    sigma_emu_list = sigma_emu.tolist()
-    print(f"[recovery_mv] Emulator error cov diag: {np.diag(sigma_emu).tolist()}")
+    print(f"[recovery_mv] Using JNNX synthetic likelihood ({slug}_sl)")
 
     n_chains = settings["n_chains"]
-    max_workers = int(
-        os.environ.get("ESL_WORKERS", max(1, int(cpu_count() * 0.9)) // n_chains)
-    )
-    max_workers = max(1, max_workers)
+    max_workers = resolve_recovery_workers(n_chains)
 
     print(f"[recovery_mv] Model: {slug}")
     print(f"[recovery_mv] Settings: {settings}")
@@ -238,9 +221,7 @@ def run_recovery_study_mv(slug: str) -> None:
         for i, (lo, hi) in enumerate(model.param_bounds):
             true_params[i] = rng.uniform(lo, hi)
         subj_seed = 1000 + subj
-        work_items.append(
-            (slug, true_params, subj_seed, settings, str(onnx_path), sigma_emu_list)
-        )
+        work_items.append((slug, true_params, subj_seed, settings, str(onnx_path)))
 
     true_params_list = []
     estimated_params_list = []

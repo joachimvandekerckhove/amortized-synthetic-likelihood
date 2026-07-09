@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Application entry point for the ddm4mv ESL pipeline."""
+"""Application entry point for the ddm4mv ASL pipeline."""
 
 import sys
 
-from esl.registry import register
+from asl.registry import register
 from models.ddm.ddm4mv import DDM4MV
 
 SLUG = "ddm4mv"
@@ -19,19 +19,19 @@ def main() -> None:
     step = sys.argv[1]
 
     if step == "generate-data":
-        from esl.cov_data import generate_cov_dataset
+        from asl.cov_data import generate_cov_dataset
 
         generate_cov_dataset(SLUG)
     elif step == "train-emulator":
-        from esl.train_mv import train_emulator_mv
+        from asl.train_mv import train_emulator_mv
 
         train_emulator_mv(SLUG)
     elif step == "wire-to-jags":
-        from esl.wire import wire_to_jags
+        from asl.wire import wire_to_jags
 
         wire_to_jags(SLUG)
     elif step == "confirm-recovery":
-        from esl.recovery_mv import run_recovery_study_mv
+        from asl.recovery_mv import run_recovery_study_mv
 
         run_recovery_study_mv(SLUG)
 

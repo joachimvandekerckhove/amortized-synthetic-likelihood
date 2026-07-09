@@ -1,11 +1,11 @@
 """
-esl.registry -- Model registry.
+asl.registry -- Model registry.
 
-Application scripts register models before calling ESL pipeline functions.
-The registry is intentionally empty at import time so esl stays model-agnostic.
+Application scripts register models before calling ASL pipeline functions.
+The registry is intentionally empty at import time so asl stays model-agnostic.
 """
 
-from esl.spec import Model
+from asl.spec import Model
 
 _REGISTRY: dict[str, Model] = {}
 
@@ -42,7 +42,7 @@ def get_model(slug: str) -> Model:
         available = ", ".join(sorted(_REGISTRY.keys())) or "(none)"
         raise KeyError(
             f"Unknown model slug '{slug}'. Available: {available}. "
-            "Register the model in your application script before calling ESL."
+            "Register the model in your application script before calling ASL."
         )
     return _REGISTRY[slug]
 

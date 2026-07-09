@@ -1,7 +1,7 @@
 """
-esl.data -- Dataset loading and target transformations for the training stage.
+asl.data -- Dataset loading and target transformations for the training stage.
 
-Loads CSV files produced by esl.generate_data, applies input standardization
+Loads CSV files produced by asl.cov_data, applies input standardization
 (StandardScaler) and target transforms (log1p on RT columns + joint
 standardization).  Provides inverse transforms for recovering original units.
 """
@@ -12,8 +12,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-from esl.registry import get_model
-from esl.spec import Model
+from asl.spec import Model
 
 
 def _is_proportion_summary(name: str) -> bool:
@@ -116,50 +115,3 @@ def load_target_transform(slug: str) -> TargetTransform:
     path = Path("results") / slug / "target_transform.pkl"
     with open(path, "rb") as f:
         return pickle.load(f)
-
-
-def load_dataset(
-    slug: str, subsample: int | None = None, seed: int = 42
-) -> tuple[np.ndarray, np.ndarray, Model]:
-    """Load training CSV for a model and return raw arrays.
-
-    Parameters
-    ----------
-    slug : str
-        Model identifier.
-    subsample : int or None
-        If given, randomly subsample to this many rows.
-    seed : int
-        Seed for subsampling reproducibility.
-
-    Returns
-    -------
-    X : np.ndarray of shape (n_rows, n_params), float32
-    y : np.ndarray of shape (n_rows, n_summaries), float32
-    model : Model
-    """
-    import pandas as pd
-
-    model = get_model(slug)
-    data_slug = model.source_slug or slug
-    data_path = Path("data") / data_slug / "train.csv"
-
-    df = pd.read_csv(data_path)
-    expected_cols = list(model.param_names) + list(model.summary_names)
-    if list(df.columns) != expected_cols:
-        raise ValueError(
-            f"Unexpected columns in {data_path}. "
-            f"Expected {expected_cols}, got {list(df.columns)}"
-        )
-
-    mask = np.isfinite(df.values).all(axis=1)
-    df = df.loc[mask].reset_index(drop=True)
-
-    if subsample is not None and len(df) > subsample:
-        rng = np.random.default_rng(seed)
-        indices = rng.choice(len(df), size=subsample, replace=False)
-        df = df.iloc[indices].reset_index(drop=True)
-
-    X = df[list(model.param_names)].values.astype(np.float32)
-    y = df[list(model.summary_names)].values.astype(np.float32)
-    return X, y, model

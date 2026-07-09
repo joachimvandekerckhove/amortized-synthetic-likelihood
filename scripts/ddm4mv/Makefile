@@ -34,7 +34,7 @@ wire-to-jags: $(JNNX)
 confirm-recovery: $(RECOVERY)
 
 confirm-recovery-highn:
-	$(ENV) ESL_N_SUBJECTS=50 ESL_N_TRIALS=10000 $(PY) $(RUN) confirm-recovery
+	$(ENV) ASL_CONFIG=$(ROOT)/configs/recovery_highn.toml $(PY) $(RUN) confirm-recovery
 
 clean:
 	rm -rf $(ROOT)/results/$(MODEL) \
