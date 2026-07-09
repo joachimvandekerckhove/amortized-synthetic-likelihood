@@ -1,10 +1,11 @@
 """
 models.ddm.ddmcollapsesig -- DDM with symmetric sigmoid collapsing bounds.
 
-Two conditions share the parameter vector (a0, v, k, t0):
+Parameters: a0, v, k, t0
 
-* fixed: constant boundary a0 / 2 (k is ignored)
-* collapse: boundary a0 / (1 + exp(k t))
+The boundary at time t is a0 / (1 + exp(k * t)).  When k = 0 this reduces
+to the constant boundary a0 / 2, so the fixed-bound case is a special case
+of this model and requires no separate treatment.
 """
 
 from __future__ import annotations
@@ -63,11 +64,9 @@ def simulate_paths(
     t0: float,
     n_samples: int,
     seed: int,
-    *,
-    collapse: bool,
     config: SimulationConfig | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Simulate DDM paths with either fixed or sigmoid collapsing bounds."""
+    """Simulate DDM paths with a sigmoid collapsing boundary (k=0 gives fixed bounds)."""
     if config is None:
         config = SimulationConfig()
 
@@ -88,10 +87,7 @@ def simulate_paths(
             break
 
         current_time = step * dt
-        if collapse:
-            bound = float(collapse_bound(current_time, a0, k))
-        else:
-            bound = a0 / 2.0
+        bound = float(collapse_bound(current_time, a0, k))
 
         noise = rng.standard_normal(alive.sum())
         positions[alive] += v * dt + sigma * sqrt_dt * noise
@@ -128,21 +124,8 @@ def summaries_from_paths(reaction_times: np.ndarray, choices: np.ndarray) -> np.
     ).astype(np.float64)
 
 
-def simulate_summaries_fixed(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
-    """Simulate summaries for the fixed-bound condition."""
+def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
+    """Simulate summaries for the sigmoid-collapsing-bound DDM."""
     a0, v, k, t0 = (float(params[i]) for i in range(4))
-    reaction_times, choices = simulate_paths(
-        a0, v, k, t0, n_trials, seed, collapse=False
-    )
-    return summaries_from_paths(reaction_times, choices)
-
-
-def simulate_summaries_collapse(
-    params: np.ndarray, n_trials: int, seed: int
-) -> np.ndarray:
-    """Simulate summaries for the sigmoid-collapse condition."""
-    a0, v, k, t0 = (float(params[i]) for i in range(4))
-    reaction_times, choices = simulate_paths(
-        a0, v, k, t0, n_trials, seed, collapse=True
-    )
+    reaction_times, choices = simulate_paths(a0, v, k, t0, n_trials, seed)
     return summaries_from_paths(reaction_times, choices)

@@ -9,6 +9,13 @@ cognitive models with intractable likelihoods*. Three models are covered:
 | `ddm4mv` | v, a, t0, w | rt\_mean/var (corr + err), err\_rate | DeepWide\_32x6 | 10,000 |
 | `ddmcollapsesig` | a0, v, k, t0 | acc, rt quantiles (5th–95th, corr + err) | DeepWide\_32x6 | 10,000 |
 
+The `ddmcollapsesig` model has a sigmoid collapsing boundary
+`a(t) = a0 / (1 + exp(k t))`. The collapse rate k has no known forward
+equations relating it to observable statistics, which makes this model a
+natural showcase for the ASL approach. Setting k = 0 recovers constant bounds
+as a special case, so the emulator covers the full range k ∈ [0, 8] with a
+single network.
+
 Each pipeline has four stages: generate training data → train dual-head
 emulator → compile into JAGS via JNNX → run simulate-and-recover.
 
@@ -203,51 +210,43 @@ High-N:
 ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm4mv confirm-recovery
 ```
 
-### 4.3 Example 3: collapsing-bounds DDM, joint recovery (`ddmcollapsesig`)
+### 4.3 Example 3: collapsing-bounds DDM (`ddmcollapsesig`)
 
-Two condition emulators (`ddmcollapsesig_fixed` and `ddmcollapsesig_collapse`)
-share one parameter vector (a0, v, k, t0) and are inferred jointly. Training
-data is **not** committed and must be generated first (~45 min per condition):
-
-```bash
-make -C scripts/ddmcollapsesig generate-data   # both conditions
-```
-
-Train both emulators (~40 min each on GPU):
+This model has a sigmoid collapsing boundary `a(t) = a0 / (1 + exp(k t))`.
+The collapse rate k does not appear in any known closed-form expression for
+response-time statistics, so likelihood-based inference is not possible without
+an emulator. Training data is **not** committed and must be generated first
+(~45 min):
 
 ```bash
-make -C scripts/ddmcollapsesig train           # train-fixed + train-collapse
+make -C scripts/ddmcollapsesig generate-data
 ```
 
-Compile both into JAGS modules:
+Train the emulator (~40 min on GPU):
 
 ```bash
-make -C scripts/ddmcollapsesig wire            # wire-fixed + wire-collapse
+make -C scripts/ddmcollapsesig train-emulator
 ```
 
-The joint JAGS model uses one SL node per condition:
-
-```
-obs_fixed_std[1:10]    ~ ddmcollapsesig_fixed_sl(a0, v, k, t0, n_trials_fixed)
-obs_collapse_std[1:10] ~ ddmcollapsesig_collapse_sl(a0, v, k, t0, n_trials_collapse)
-```
-
-Run joint recovery (500 subjects × 500 trials, ~6–8 h):
+Compile into a JAGS module:
 
 ```bash
-make -C scripts/ddmcollapsesig joint-recovery
+make -C scripts/ddmcollapsesig wire-to-jags
 ```
 
-Output: `results/ddmcollapsesig_joint/recovery_summary.json`
+Inference uses one stochastic node:
 
-Expected result (500/500 converged):
+```
+obs_std[1:10] ~ ddmcollapsesig_sl(a0, v, k, t0, n_trials)
+```
 
-| Parameter | Correlation | 95% CI coverage |
-|---|---|---|
-| a0 | 0.997 | 0.932 |
-| v | 0.996 | 0.940 |
-| k | 0.988 | 0.966 |
-| t0 | 0.999 | 0.960 |
+Run the simulate-and-recover study (500 subjects × 500 trials, ~3–5 h):
+
+```bash
+make -C scripts/ddmcollapsesig confirm-recovery
+```
+
+Output: `results/ddmcollapsesig/recovery_summary.json`
 
 Run the full pipeline in one command:
 
@@ -307,7 +306,8 @@ models/ddm/                         model definitions
   simulator.py                      Euler DDM simulator
   ddm3.py  ddm4.py                  scalar model specs
   ddm3mv.py  ddm4mv.py              multivariate emulator model specs
-  ddmcollapsesig*.py                collapsing-bounds model specs
+  ddmcollapsesig.py                 collapsing-bounds simulator and summaries
+  ddmcollapsesigmv.py               collapsing-bounds multivariate emulator spec
 
 tests/                              unit tests (pytest)
 ```

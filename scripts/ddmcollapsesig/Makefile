@@ -4,53 +4,36 @@ PY := $(ROOT)/.venv/bin/python
 RUN := $(ROOT)/scripts/$(MODEL)/run.py
 ENV := cd $(ROOT) && unset CUDA_VISIBLE_DEVICES &&
 
-FIXED_DATA    := $(ROOT)/data/ddmcollapsesig_fixed/cov_train.csv
-COLLAPSE_DATA := $(ROOT)/data/ddmcollapsesig_collapse/cov_train.csv
-FIXED_ONNX    := $(ROOT)/results/ddmcollapsesig_fixed/model.onnx
-COLLAPSE_ONNX := $(ROOT)/results/ddmcollapsesig_collapse/model.onnx
-FIXED_JNNX    := $(ROOT)/models/ddmcollapsesig_fixed.jnnx/model.onnx
-COLLAPSE_JNNX := $(ROOT)/models/ddmcollapsesig_collapse.jnnx/model.onnx
-RECOVERY      := $(ROOT)/results/ddmcollapsesig_joint/recovery_summary.json
+DATA        := $(ROOT)/data/$(MODEL)/cov_train.csv
+TRANSFORM   := $(ROOT)/results/$(MODEL)/target_transform.pkl
+ONNX        := $(ROOT)/results/$(MODEL)/model.onnx
+JNNX        := $(ROOT)/models/$(MODEL).jnnx/model.onnx
+RECOVERY    := $(ROOT)/results/$(MODEL)/recovery_summary.json
 
 .DEFAULT_GOAL := all
 
 all: $(RECOVERY)
 
-$(FIXED_DATA):
-	$(ENV) $(PY) $(RUN) generate-fixed
+$(DATA):
+	$(ENV) $(PY) $(RUN) generate-data
 
-$(COLLAPSE_DATA):
-	$(ENV) $(PY) $(RUN) generate-collapse
+$(ONNX): $(DATA)
+	$(ENV) $(PY) $(RUN) train-emulator
 
-$(FIXED_ONNX): $(FIXED_DATA)
-	$(ENV) $(PY) $(RUN) train-fixed
+$(JNNX): $(ONNX) $(TRANSFORM)
+	$(ENV) $(PY) $(RUN) wire-to-jags
 
-$(COLLAPSE_ONNX): $(COLLAPSE_DATA)
-	$(ENV) $(PY) $(RUN) train-collapse
+$(RECOVERY): $(JNNX)
+	$(ENV) $(PY) $(RUN) confirm-recovery
 
-$(FIXED_JNNX): $(FIXED_ONNX)
-	$(ENV) $(PY) $(RUN) wire-fixed
+.PHONY: generate-data train-emulator wire-to-jags confirm-recovery clean
 
-$(COLLAPSE_JNNX): $(COLLAPSE_ONNX)
-	$(ENV) $(PY) $(RUN) wire-collapse
-
-$(RECOVERY): $(FIXED_JNNX) $(COLLAPSE_JNNX)
-	$(ENV) $(PY) $(RUN) joint-recovery
-
-.PHONY: generate-data train wire joint-recovery clean
-
-generate-data: $(FIXED_DATA) $(COLLAPSE_DATA)
-train: $(FIXED_ONNX) $(COLLAPSE_ONNX)
-wire: $(FIXED_JNNX) $(COLLAPSE_JNNX)
-joint-recovery: $(RECOVERY)
+generate-data: $(DATA)
+train-emulator: $(ONNX)
+wire-to-jags: $(JNNX)
+confirm-recovery: $(RECOVERY)
 
 clean:
-	rm -rf $(ROOT)/data/ddmcollapsesig_fixed \
-	       $(ROOT)/data/ddmcollapsesig_collapse \
-	       $(ROOT)/results/ddmcollapsesig_fixed \
-	       $(ROOT)/results/ddmcollapsesig_collapse \
-	       $(ROOT)/results/ddmcollapsesig_joint \
-	       $(ROOT)/models/ddmcollapsesig_fixed.jnnx \
-	       $(ROOT)/models/ddmcollapsesig_collapse.jnnx \
-	       $(ROOT)/figures/ddmcollapsesig_fixed \
-	       $(ROOT)/figures/ddmcollapsesig_collapse
+	rm -rf $(ROOT)/results/$(MODEL) \
+	       $(ROOT)/models/$(MODEL).jnnx $(ROOT)/figures/$(MODEL) \
+	       $(ROOT)/data/$(MODEL)
