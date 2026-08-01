@@ -143,9 +143,25 @@ make -C scripts/MODEL all
 
 Do not skip `wire-to-jags`. Recovery depends on the compiled JAGS module.
 
+After upgrading to JNNX v2, re-run `wire-to-jags` for every model even if an
+older `.jnnx` package exists locally (packages are gitignored and must include
+`obs_transform.json`).
+
 ## Success criteria
 
 After the run, verify these artifacts exist and inspect their contents.
+
+### JNNX package (`models/MODEL.jnnx/`)
+
+Created by `wire-to-jags` (gitignored; not in the repository). Required files:
+
+- `metadata.json` with `"version": "2.0.0"`
+- `obs_transform.json` (column transforms for raw JAGS observations)
+- `model.onnx`, `likelihood.json`, `scalers.json`
+
+Optional: if `fixtures/MODEL_sl_regression.json` is present, `wire-to-jags`
+also runs numerical SL regression checks. Without that file, wiring still
+succeeds and only skips the regression step.
 
 ### Training (`results/MODEL/final_summary.json`)
 

@@ -103,7 +103,7 @@ class TestEmulatorErrorCov:
 class TestJagsHelpers:
     def test_build_sl_likelihood_line(self):
         lines = build_sl_likelihood_line("ddm3mv", ("v", "a", "t0"), 3)
-        assert lines == ["obs_std[1:3] ~ ddm3mv_sl(v, a, t0, n_trials)"]
+        assert lines == ["obs[1:3] ~ ddm3mv_sl(v, a, t0, n_trials)"]
 
     def test_build_mv_jags_likelihood_for_model(self):
         lines = build_mv_jags_likelihood_for_model(

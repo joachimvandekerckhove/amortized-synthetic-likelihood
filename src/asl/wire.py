@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from asl.config import load_config
+from asl.data import write_obs_transform_json
 from asl.mv import emulator_error_cov_path, load_emulator_error_cov, n_chol
 from asl.registry import get_model
 from asl.spec import Model
@@ -24,7 +25,7 @@ def _supports_sl_package(model: Model) -> bool:
 
 
 def _output_parameters_with_groups(model: Model) -> list[dict[str, str]]:
-    """Attach mean/chol groups for JNNX v1.1 SL packages."""
+    """Attach mean/chol groups for JNNX v2 SL packages."""
     outputs: list[dict[str, str]] = []
     n = model.n_summaries
     for i, name in enumerate(model.output_names):
@@ -60,7 +61,7 @@ def build_jnnx_package(model: Model, onnx_path: Path, package_dir: Path) -> None
         "model_name": model.slug,
         "module_name": function_name,
         "function_name": function_name,
-        "version": "1.1.1" if sl_enabled else "1.0.0",
+        "version": "2.0.0" if sl_enabled else "1.0.0",
         "input_parameters": [
             {"name": name, "min": float(bounds[0]), "max": float(bounds[1])}
             for name, bounds in zip(model.param_names, model.param_bounds)
@@ -131,6 +132,7 @@ def build_jnnx_package(model: Model, onnx_path: Path, package_dir: Path) -> None
     if sl_enabled:
         sigma_emu = load_emulator_error_cov(model.slug)
         _write_likelihood_json(model, package_dir, sigma_emu)
+        write_obs_transform_json(model.slug, model.summary_names, package_dir)
         expected_m = model.n_summaries + n_chol(model.n_summaries)
         if model.n_outputs != expected_m:
             raise RuntimeError(

@@ -18,8 +18,6 @@ def build_ddmcollapsesig_jags_likelihood(obs: dict) -> list[str]:
         "ddmcollapsesig",
         PARAM_NAMES,
         N_SUMMARIES,
-        obs_name="obs_std",
-        n_trials_name="n_trials",
     )
 
 

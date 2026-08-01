@@ -57,6 +57,7 @@ results/SLUG/model.onnx
 results/SLUG/final_summary.json
 results/SLUG/recovery_summary.json
 models/SLUG.jnnx/
+  obs_transform.json                  raw-summary transforms (JNNX v2; written by wire-to-jags)
 figures/SLUG/recovery.pdf
 ```
 
@@ -165,7 +166,6 @@ from models.<family>.<slug_base> import (
 def build_<slug>_jags_likelihood(obs: dict) -> list[str]:
     return build_sl_likelihood_line(
         "SLUG", PARAM_NAMES, N_SUMMARIES,
-        obs_name="obs_std", n_trials_name="n_trials",
     )
 
 <SLUG_UPPER>MV = Model(
@@ -186,7 +186,9 @@ Checklist:
 
 - `slug` matches directory names in `data/`, `results/`, `scripts/`
 - `emulator_output_names` is set (required for multivariate / SL path)
-- `build_jags_likelihood` returns one line: `obs_std[1:p] ~ SLUG_sl(...)`
+- `build_jags_likelihood` returns one line: `obs[1:p] ~ SLUG_sl(...)` (raw
+  summaries; JNNX applies transforms from `obs_transform.json` at compile time)
+- `wire-to-jags` must succeed and produce `models/SLUG.jnnx/obs_transform.json`
 - `recovery_priors` use JAGS syntax consistent with `param_bounds`
 - `supports_mv_recovery()` is True (automatic when hooks are set)
 - `n_outputs == n_summaries + n_summaries * (n_summaries + 1) // 2` (mu + chol)

@@ -29,19 +29,17 @@ N_CHAINS = 4
 
 def simulate_subject_observations_mv(
     model: Model,
-    target_transform,
     params: np.ndarray,
     n_trials: int,
     seed: int,
 ) -> dict:
-    """Simulate one subject and return standardized observed summaries."""
+    """Simulate one subject and return raw observed summaries for JAGS."""
     summaries = model.simulate_summaries(params, n_trials, seed)
     valid = bool(np.all(np.isfinite(summaries)))
     if not valid:
         return {"valid": False}
 
-    obs_std = target_transform.transform(summaries.reshape(1, -1))[0]
-    return {"obs_std": obs_std, "valid": True}
+    return {"obs": summaries.reshape(-1), "valid": True}
 
 
 def build_jags_model_string_mv(model: Model, obs: dict) -> str:
@@ -130,17 +128,19 @@ def _recover_one_subject_mv(args: tuple) -> dict | None:
     module_name = f"{model.slug}_emulator"
 
     obs = simulate_subject_observations_mv(
-        model, target_transform, true_params, settings["n_trials"], subj_seed
+        model, true_params, settings["n_trials"], subj_seed
     )
     if not obs["valid"]:
         return None
 
     model_string = build_jags_model_string_mv(model, obs)
+    obs_raw = np.asarray(obs["obs"], dtype=np.float64)
+    obs_std = target_transform.transform(obs_raw.reshape(1, -1))[0]
     data = {
-        "obs_std": obs["obs_std"].tolist(),
+        "obs": obs_raw.tolist(),
         "n_trials": settings["n_trials"],
     }
-    inits = compute_mle_initial_values_mv(model, obs["obs_std"], onnx_path)
+    inits = compute_mle_initial_values_mv(model, obs_std, onnx_path)
 
     try:
         result = run_jags(

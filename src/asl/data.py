@@ -6,6 +6,7 @@ Loads CSV files produced by asl.cov_data, applies input standardization
 standardization).  Provides inverse transforms for recovering original units.
 """
 
+import json
 import pickle
 from pathlib import Path
 
@@ -115,3 +116,39 @@ def load_target_transform(slug: str) -> TargetTransform:
     path = Path("results") / slug / "target_transform.pkl"
     with open(path, "rb") as f:
         return pickle.load(f)
+
+
+def column_transforms_for_target(target_transform: TargetTransform) -> list[str]:
+    """Map ASL rt_mask to JNNX v2 column_transforms entries."""
+    return [
+        "log1p" if bool(target_transform.rt_mask[i]) else "identity"
+        for i in range(len(target_transform.rt_mask))
+    ]
+
+
+def build_obs_transform_payload(
+    target_transform: TargetTransform,
+    summary_names: tuple[str, ...] | list[str],
+) -> dict:
+    """Build obs_transform.json payload for a JNNX v2 SL package."""
+    return {
+        "version": "1.0",
+        "summary_names": list(summary_names),
+        "column_transforms": column_transforms_for_target(target_transform),
+        "scaler_mean": target_transform.scaler.mean_.tolist(),
+        "scaler_scale": target_transform.scaler.scale_.tolist(),
+    }
+
+
+def write_obs_transform_json(
+    slug: str,
+    summary_names: tuple[str, ...] | list[str],
+    package_dir: Path,
+) -> Path:
+    """Serialize target_transform.pkl into package obs_transform.json."""
+    target_transform = load_target_transform(slug)
+    payload = build_obs_transform_payload(target_transform, summary_names)
+    path = package_dir / "obs_transform.json"
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    return path

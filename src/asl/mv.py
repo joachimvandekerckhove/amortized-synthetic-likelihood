@@ -108,10 +108,10 @@ def build_sl_likelihood_line(
     param_names: tuple[str, ...] | list[str],
     n_summaries: int,
     *,
-    obs_name: str = "obs_std",
+    obs_name: str = "obs",
     n_trials_name: str = "n_trials",
 ) -> list[str]:
-    """One-line JNNX v1.1 synthetic likelihood for standardized summaries."""
+    """One-line JNNX v2 synthetic likelihood for raw physical summaries."""
     args = ", ".join(param_names)
     dist = f"{slug}_sl"
     return [f"{obs_name}[1:{n_summaries}] ~ {dist}({args}, {n_trials_name})"]
@@ -123,7 +123,7 @@ def build_mv_jags_likelihood_for_model(
     n_summaries: int,
     obs: dict | None = None,
     *,
-    obs_name: str = "obs_std",
+    obs_name: str = "obs",
     n_trials_name: str = "n_trials",
 ) -> list[str]:
     """Return synthetic-likelihood lines for one emulator."""
