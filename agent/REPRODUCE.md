@@ -15,7 +15,7 @@ recovery step reports `PASS` with all parameter coverages in **(0.90, 0.99)**.
 1. `README.md` in the repository root — full reproduction guide
 2. `asl.toml` — user configuration file you must edit
 3. `scripts/MODEL/Makefile` — exact make targets for this model
-4. Do **not** edit `src/asl/presets/full.toml` or `src/asl/presets/smoke.toml`
+4. Do **not** edit `src/asl/presets/full.toml`
 
 ## Repository
 
@@ -81,37 +81,33 @@ All tests must pass before running the pipeline.
 
 ## Configuration
 
-Edit `asl.toml` at the repo root:
+Edit `asl.toml` at the repo root only if you need overrides (see README).
+Most users need no configuration: ONNX Runtime SDK auto-downloads on first
+`wire-to-jags`, and paper-scale defaults live in `src/asl/presets/full.toml`.
 
 ```toml
-[run]
-smoke = false    # MUST be false for full reproduction
-
 [wire]
-onnxruntime_dir = "/absolute/path/to/onnxruntime-linux-x64-1.18.0"
+onnxruntime_dir = "/absolute/path/to/onnxruntime"  # optional override
 ```
 
 Rules:
 
-- **`smoke = false`** is required for the paper-scale run (10,000 training
-  epochs, 500 recovery subjects). Smoke mode is only for quick sanity checks.
-- Set `onnxruntime_dir` to the **absolute** path of the extracted ONNX Runtime
-  directory. Alternatively, export `ONNXRUNTIME_DIR` to that same path before
-  the `wire-to-jags` step.
+- Set `onnxruntime_dir` only to override the auto-downloaded SDK in `vendor/`.
 - Do not change architecture, epoch count, or recovery subject count unless I
   explicitly ask. Defaults come from `src/asl/presets/full.toml`.
 
 ## Model-specific notes
 
-| Model | Architecture | Committed training data? | Typical GPU time |
-|---|---|---|---|
-| `ddm3` | DeepWide_24x4 | yes (`data/ddm3/`) | ~20 min train + ~2–4 h recovery |
-| `ddm4` | DeepWide_32x6 | yes (`data/ddm4/`) | ~20 min train + ~2–4 h recovery |
-| `ddmcollapsesig` | DeepWide_32x6 | yes (`data/ddmcollapsesig/`) | ~40 min train + ~3–5 h recovery |
+| Model | Architecture | Committed training data? |
+|---|---|---|
+| `ddm3` | DeepWide_24x4 | yes (`data/ddm3/`) |
+| `ddm4` | DeepWide_32x6 | yes (`data/ddm4/`) |
+| `ddmcollapsesig` | DeepWide_32x6 | yes (`data/ddmcollapsesig/`) |
+| `dw` | DeepWide_32x6 | yes (`data/dw/`) |
 
 Training data generation (`make -C scripts/MODEL generate-data`) is optional
 when `data/MODEL/cov_train.csv` already exists. Skip it unless I ask to
-regenerate from scratch (~30–45 min).
+regenerate from scratch.
 
 On CPU, training and recovery take much longer. Use available CPU cores: the
 pipeline defaults to ~90% of cores for data generation and recovery parallelism.
@@ -221,12 +217,11 @@ comparable, not identical):
 
 ## What not to do
 
-- Do not edit `src/asl/presets/full.toml` or `smoke.toml`
+- Do not edit `src/asl/presets/full.toml`
 - Do not enable `ASL_LEGACY_LIKELIHOOD` or other removed code paths (they no
   longer exist)
 - Do not refactor the repository or add CLI wrappers
 - Do not commit or push unless I explicitly ask
-- Do not treat smoke-mode results as reproduction of the paper analysis
 - Do not skip the coverage gate: a finished run that prints `FAIL` is not a
   successful reproduction
 
@@ -237,10 +232,10 @@ Diagnose in stage order:
 1. **`pytest` fails** — fix the Python environment before running the pipeline
 2. **`train-emulator` fails on R²** — check that committed training data is
    intact; try `make -C scripts/MODEL clean` and rerun
-3. **`wire-to-jags` fails** — confirm `onnxruntime_dir` or `ONNXRUNTIME_DIR` is
-   set, `g++` is installed, and JAGS headers are available
-4. **`confirm-recovery` fails coverage** — confirm `smoke = false`, the JAGS
-   module compiled successfully, and `wire-to-jags` was not skipped. Check
+3. **`wire-to-jags` fails** — confirm `onnxruntime_dir` if overridden, or run
+   `make bootstrap-ort`; ensure `g++` is installed
+4. **`confirm-recovery` fails coverage** — confirm the JAGS module compiled
+   successfully and `wire-to-jags` was not skipped. Check
    `results/MODEL/recovery_summary.json` for which parameter failed
 5. **JAGS module not found** — rerun `wire-to-jags`; if `sudo make install`
    failed, the pipeline falls back to `LTDL_LIBRARY_PATH` — check wire output

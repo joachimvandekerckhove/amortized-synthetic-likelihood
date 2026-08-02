@@ -91,7 +91,9 @@ def z_mean_column_names(summary_names: tuple[str, ...]) -> list[str]:
 
 
 def draw_parameters(model: Model, rng: np.random.Generator) -> np.ndarray:
-    """Draw one parameter vector uniformly within model bounds."""
+    """Draw one parameter vector for covariance training."""
+    if model.draw_cov_parameters is not None:
+        return model.draw_cov_parameters(rng)
     params = np.empty(model.n_params)
     for i, (lo, hi) in enumerate(model.param_bounds):
         params[i] = rng.uniform(lo, hi)

@@ -8,4 +8,5 @@ figures/
 tmp/
 models/*.jnnx/
 vendor/
+logs/
 .DS_Store

@@ -1,18 +1,25 @@
 # Amortized synthetic likelihood — Reproduction Guide
 
 Reproducibility package for the paper *Amortized synthetic likelihoods for
-cognitive models with intractable likelihoods*. Three models are covered:
+cognitive models with intractable likelihoods*. Four models are covered:
 
 | Model | Parameters | Summaries | Architecture | Epochs |
 |---|---|---|---|---|
 | `ddm3` | v, a, t0 | acc, rt\_mean, rt\_var | DeepWide\_24x4 | 10,000 |
 | `ddm4` | v, a, t0, w | rt\_mean/var (corr + err), err\_rate | DeepWide\_32x6 | 10,000 |
 | `ddmcollapsesig` | a0, v, k, t0 | acc, rt quantiles (5th–95th, corr + err) | DeepWide\_32x6 | 10,000 |
+| `dw` | logit\_epsilon, logit\_mu | 6 opinion-dynamics summaries | DeepWide\_32x6 | 10,000 |
 
 The `ddmcollapsesig` model has a sigmoid collapsing boundary
 `a(t) = a0 / (1 + exp(k t))`. The collapse rate k has no known forward
 equations relating it to observable statistics, which makes this model a
 natural showcase for the ASL approach.
+
+The `dw` model implements bounded-confidence opinion dynamics (Deffuant–Weisbuch):
+agents with opinions in `[0, 1]` interact pairwise and move toward each other
+when their opinions differ by less than epsilon. Inference uses logit
+parameterizations; training explores a slightly wider epsilon range than the
+recovery prior.
 
 ## How it works
 
@@ -103,6 +110,10 @@ ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3 confirm-recovery
 | `synthetic_subjects` (recovery) | 500 |
 | `trials_per_subject` (recovery) | 500 |
 
+Committed `data/dw/cov_settings.json` records `n_rep = 500` (used when that
+training set was built). Regenerating `data/dw/` after changing defaults may
+differ.
+
 ## 4. Reproduction steps
 
 All commands run from the **repo root**.
@@ -113,10 +124,11 @@ All commands run from the **repo root**.
 make ddm3              # full pipeline for 3-parameter DDM
 make ddm4              # full pipeline for 4-parameter DDM
 make ddmcollapsesig    # full pipeline for collapsing-bounds DDM
-make all               # all three models
+make dw                # full pipeline for Deffuant-Weisbuch (DW) opinion dynamics
+make all               # all four models
 ```
 
-Training data is committed for all three models (`data/<model>/cov_train.csv`).
+Training data is committed for all four models (`data/<model>/cov_train.csv`).
 To regenerate: `make -C scripts/<model> generate-data`.
 
 If you already have `results/<model>/model.onnx` from a prior run, skip
@@ -125,9 +137,10 @@ training and run only `make -C scripts/<model> wire-to-jags`.
 ### Reference machine
 
 On a 32-core CPU with two NVIDIA GTX 1080 Ti GPUs, a full `make all` run
-(train + wire + recovery for all three models) took about four hours. Per-model
+(train + wire + recovery for all four models) took about five hours. Per-model
 recovery dominated wall time (ddm3 about 30 minutes, ddm4 about one hour,
-`ddmcollapsesig` about two hours). Your machine will differ.
+`ddmcollapsesig` about two hours, `dw` about 35 minutes). Your machine will
+differ.
 
 ### 4.1 Walkthrough: `ddm3` (step by step)
 
@@ -202,11 +215,42 @@ Expected recovery:
 | k | 0.958 | 0.940 |
 | t0 | 0.994 | 0.962 |
 
+### 4.4 `dw`
+
+```bash
+make dw
+```
+
+Inference:
+
+```
+obs[1:6] ~ dw_sl(logit_epsilon, logit_mu, n_trials)
+```
+
+Expected emulator accuracy (reference machine):
+
+| Summary | R² |
+|---|---|
+| Effective clusters (final) | 0.99927 |
+| Opinion entropy (final) | 0.99949 |
+| Mean opinion shift | 0.99980 |
+| Late opinion variance | 0.99949 |
+| Abs. variance change | 0.99970 |
+| Large-move rate | 0.99941 |
+| Overall | 0.99928 |
+
+Expected recovery (MCMC is stochastic; expect small differences across machines):
+
+| Parameter | Correlation | 95% CI coverage |
+|---|---|---|
+| logit\_epsilon | 0.976 | 0.940 |
+| logit\_mu | 0.967 | 0.936 |
+
 ## 5. Coverage gates
 
 Each recovery study applies an automated gate: every parameter's empirical
 95% CI coverage must fall in **(0.90, 0.99)**. The pipeline exits non-zero
-if any parameter fails. All three examples pass with the default settings.
+if any parameter fails. All four examples pass with the default settings.
 
 ## 6. Repository layout
 
@@ -222,7 +266,8 @@ data/<model>/cov_settings.json      metadata: n_rep, R, seed
 scripts/<model>/run.py              pipeline entry point
 scripts/<model>/Makefile            step targets
 
-models/ddm/                         model simulators and specs
+models/ddm/                         DDM simulators and specs
+models/social/                      opinion-dynamics models (dw)
 src/asl/                            pipeline library
 tests/                              unit tests (pytest)
 vendor/                             ONNX Runtime SDK (auto-downloaded, gitignored)

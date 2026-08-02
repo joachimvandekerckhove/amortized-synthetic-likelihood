@@ -95,6 +95,11 @@ def resolve_recovery_settings() -> dict:
     }
 
 
+def inference_bounds(model: Model) -> tuple[tuple[float, float], ...]:
+    """Bounds for recovery subject draws and MLE warm-start."""
+    return model.prior_bounds or model.param_bounds
+
+
 def simulate_subject_observations(
     model: Model,
     params: np.ndarray,
@@ -125,8 +130,10 @@ def _compute_mle_initial_values(
     session = cpu_inference_session(onnx_path)
     n = model.n_summaries
 
+    bounds = inference_bounds(model)
+
     def neg_log_lik(params: np.ndarray) -> float:
-        for i, (lo, hi) in enumerate(model.param_bounds):
+        for i, (lo, hi) in enumerate(bounds):
             if params[i] <= lo or params[i] >= hi:
                 return 1e12
         x = params.astype(np.float32).reshape(1, -1)
@@ -137,12 +144,12 @@ def _compute_mle_initial_values(
     if model.n_params <= 3:
         grid_vals = [
             np.linspace(lo + (hi - lo) * 0.2, hi - (hi - lo) * 0.2, 3)
-            for lo, hi in model.param_bounds
+            for lo, hi in bounds
         ]
         grid_starts = [np.array(pt) for pt in product(*grid_vals)]
     else:
-        v_lo, v_hi = model.param_bounds[0]
-        t0_lo, t0_hi = model.param_bounds[2]
+        v_lo, v_hi = bounds[0]
+        t0_lo, t0_hi = bounds[2]
         v_vals = np.linspace(v_lo + 0.2 * (v_hi - v_lo), v_hi - 0.2 * (v_hi - v_lo), 3)
         a_vals = np.array([0.8, 1.5])
         t0_vals = np.array([(t0_lo + t0_hi) / 2.0])
@@ -164,14 +171,14 @@ def _compute_mle_initial_values(
             best_result = res
 
     mle = best_result.x  # type: ignore[union-attr]
-    jitter_scale = np.array([(hi - lo) * 0.02 for lo, hi in model.param_bounds])
+    jitter_scale = np.array([(hi - lo) * 0.02 for lo, hi in bounds])
 
     rng = np.random.default_rng(99)
     inits = []
     for _ in range(N_CHAINS):
         jittered = {}
         for i, name in enumerate(model.param_names):
-            lo, hi = model.param_bounds[i]
+            lo, hi = bounds[i]
             val = float(mle[i]) + rng.normal(0, jitter_scale[i])
             jittered[name] = float(np.clip(val, lo + 1e-4, hi - 1e-4))
         inits.append(jittered)
@@ -274,9 +281,10 @@ def run_recovery_study(model: Model) -> None:
 
     rng = np.random.default_rng(42)
     work_items = []
+    recovery_bounds = inference_bounds(model)
     for subj in range(settings["n_subjects"]):
         true_params = np.empty(model.n_params)
-        for i, (lo, hi) in enumerate(model.param_bounds):
+        for i, (lo, hi) in enumerate(recovery_bounds):
             true_params[i] = rng.uniform(lo, hi)
         subj_seed = 1000 + subj
         work_items.append((slug, true_params, subj_seed, settings, str(onnx_path)))

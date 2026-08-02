@@ -11,6 +11,7 @@ from typing import Callable
 import numpy as np
 
 SimulateFn = Callable[[np.ndarray, int, int], np.ndarray]
+DrawCovFn = Callable[[np.random.Generator], np.ndarray]
 JagsLinesFn = Callable[[dict], list[str]]
 
 
@@ -23,6 +24,8 @@ class Model:
     param_bounds: tuple[tuple[float, float], ...]
     summary_names: tuple[str, ...]
     simulate_summaries: SimulateFn
+    prior_bounds: tuple[tuple[float, float], ...] | None = None
+    draw_cov_parameters: DrawCovFn | None = None
     recovery_priors: dict = field(default_factory=dict)
     build_jags_likelihood: JagsLinesFn | None = None
     emulator_output_names: tuple[str, ...] | None = None

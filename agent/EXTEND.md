@@ -11,12 +11,11 @@ Implement a new model **SLUG** end to end:
 3. register a multivariate `Model` spec with JAGS synthetic-likelihood hooks
 4. add a `scripts/SLUG/` pipeline (Makefile + run.py)
 5. add unit tests, including **parameter-sensitivity checks for every summary**
-6. run smoke mode, then full mode, and confirm all gates pass
+6. run the full pipeline and confirm all gates pass
 
 Success means:
 
 - `pytest` passes (including your new tests)
-- smoke pipeline completes (`asl.toml`: `[run] smoke = true`)
 - full pipeline completes with `[train] PASS` (R² >= threshold) and
   `[recovery] PASS` (all coverages in **(0.90, 0.99)**)
 
@@ -24,29 +23,29 @@ Success means:
 
 Study these existing models as templates (simplest to more complex):
 
-1. `models/ddm/ddm3.py` + `models/ddm/ddm3.py` — three summaries, three params
-2. `models/ddm/ddmcollapsesig.py` + `models/ddm/ddmcollapsesigmv.py` — ten
-   summaries, four params, parameter-sensitivity tests
-3. `src/asl/spec.py` — `Model` dataclass contract
-4. `src/asl/data.py` — how summary names map to log1p transforms
-5. `src/asl/mv.py` — `build_sl_likelihood_line`, `emulator_output_names_for`
-6. `scripts/ddm3/run.py` and `scripts/ddm3/Makefile` — pipeline wiring
-7. `tests/test_ddmcollapsesig.py` — sensitivity and model-spec tests
-8. `agent/REPRODUCE.md` — environment setup and gate definitions
+1. `models/ddm/ddm3.py` — three summaries, three params
+2. `models/ddm/ddmcollapsesig.py` — ten summaries, four params
+3. `models/social/dw.py` — non-RT summaries, custom training draws, prior bounds
+4. `src/asl/spec.py` — `Model` dataclass contract
+5. `src/asl/data.py` — how summary names map to log1p transforms
+6. `src/asl/cholesky.py` — `build_sl_likelihood_line`, `emulator_output_names_for`
+7. `scripts/ddm3/run.py` and `scripts/ddm3/Makefile` — pipeline wiring
+8. `tests/test_ddmcollapsesig.py` — sensitivity and model-spec tests
+9. `agent/REPRODUCE.md` — environment setup and gate definitions
 
-Do **not** edit `src/asl/presets/full.toml` or `smoke.toml` unless I explicitly
-ask. Override hyperparameters in `asl.toml` instead.
+Do **not** edit `src/asl/presets/full.toml` unless I explicitly ask. Override
+hyperparameters in `asl.toml` or via `ASL_CONFIG` instead.
 
 ## Repository layout for a new model
 
 Add files (choose informative <family> paths if your model is not a DDM variant):
 
 ```
-models/<family>/<slug_base>.py      # simulator + constants
-models/<family>/<slug>mv.py         # Model spec (or single file if small)
+models/<family>/<slug>.py           # simulator + Model spec
 scripts/SLUG/run.py                 # four-step dispatcher
 scripts/SLUG/Makefile               # make targets
 tests/test_<slug>.py                # simulator + spec tests
+data/SLUG/cov_train.csv             # committed training data (after full run)
 ```
 
 Generated at runtime (gitignored):
@@ -232,17 +231,15 @@ All tests must pass before running the pipeline.
 
 Follow `agent/REPRODUCE.md` for system packages, Python venv, and ONNX Runtime.
 
-Edit `asl.toml`:
+`asl.toml` is optional for most runs. Override hyperparameters there or via
+`ASL_CONFIG` (see README).
 
 ```toml
-[run]
-smoke = true    # start with smoke; switch to false for full run
-
 [wire]
-onnxruntime_dir = "/absolute/path/to/onnxruntime-linux-x64-1.18.0"
+onnxruntime_dir = "/absolute/path/to/onnxruntime"  # optional
 ```
 
-Optional overrides for development (in `asl.toml`, not presets):
+Optional overrides for development:
 
 ```toml
 [training]
@@ -255,7 +252,7 @@ parallel_workers = 8
 parallel_workers = 4
 ```
 
-## Step 8: Smoke test (required before full run)
+## Step 8: Run the pipeline
 
 From the repo root:
 
@@ -263,30 +260,29 @@ From the repo root:
 make -C scripts/SLUG all
 ```
 
-Smoke mode uses 300 epochs, 800 parameter draws, 50 recovery subjects. Expect
-roughly 5–15 minutes depending on simulator cost and hardware.
+For a quicker recovery check during development, layer a smaller override:
+
+```bash
+ASL_CONFIG=configs/recovery_highn.toml make -C scripts/SLUG confirm-recovery
+```
+
+(Customize a config file with fewer subjects or trials as needed.)
 
 Verify:
 
-- `data/SLUG/cov_train.csv` created
-- `results/SLUG/final_summary.json` — R² >= 0.995 (smoke threshold)
+- `data/SLUG/cov_train.csv` created (or committed data present)
+- `results/SLUG/final_summary.json` — R² >= 0.999 in `final_summary.json`
 - `results/SLUG/recovery_summary.json` — pipeline prints `[recovery] PASS`
 
-If smoke fails, fix the simulator or summaries before enabling full mode. Common
+If training fails, fix the simulator or summaries before a full rerun. Common
 causes: too many NaN rows in training data, summaries not sensitive to params,
 bounds too wide, or architecture too small for the parameter count.
 
-## Step 9: Full pipeline run
+## Step 9: Gates
 
-Set `smoke = false` in `asl.toml`, then:
-
-```bash
-make -C scripts/SLUG clean
-make -C scripts/SLUG all
-```
-
-Full mode: 20,000 parameter draws, 10,000 training epochs, 500 recovery
-subjects x 500 trials. This can take hours on CPU.
+Paper-scale defaults: 20,000 parameter draws, 10,000 training epochs, 500
+recovery subjects x 500 trials. Wall time depends on hardware (see README
+reference machine).
 
 Gates (same as `agent/REPRODUCE.md`):
 
@@ -314,14 +310,13 @@ If I ask you to commit artifacts, follow the pattern of existing models:
 - Do not modify core `asl` library code unless a hook is genuinely missing, and in
   that case backwards compatibility is inviolable
 - Do not skip parameter-sensitivity tests
-- Do not treat smoke-mode recovery as paper-scale validation
 - Do not commit or push unless I explicitly ask
 
 ## If something fails
 
 | Symptom | Likely cause | Action |
 |---|---|---|
-| Many invalid rows in `generate-data` | simulator returns NaN too often | tighten bounds; increase `n_trials` in cov_data preset via smoke first |
+| Many invalid rows in `generate-data` | simulator returns NaN too often | tighten bounds; increase `trials_per_replicate` via `asl.toml` |
 | Training R² below threshold | insensitive summaries; wrong transforms; too few rows | rerun Step 3; check summary names; try larger architecture |
 | Recovery coverage too low | emulator bias; poor MLE init | check `wire-to-jags` succeeded; inspect `figures/SLUG/recovery.pdf` |
 | Recovery coverage too high | overdispersed emulator; SL miswired | confirm `build_sl_likelihood_line` slug matches JNNX package name |
@@ -334,6 +329,6 @@ When finished, report:
 
 1. file list created or modified
 2. parameter -> summary sensitivity map (from tests)
-3. smoke and full gate results (JSON summaries)
+3. gate results (JSON summaries from training and recovery)
 4. total wall time per stage
 5. anything that required deviation from this checklist
