@@ -1,5 +1,5 @@
-# High-trial recovery override (merged over asl.toml via ASL_CONFIG).
-# Used by: make -C scripts/ddm3 confirm-recovery-highn
+# High-N recovery override (merged over asl.toml via ASL_CONFIG).
+# Used by: make -C scripts/<model> confirm-recovery-highn
 
 [recovery]
 synthetic_subjects = 50

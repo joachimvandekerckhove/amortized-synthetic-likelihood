@@ -208,10 +208,6 @@ Created by `wire-to-jags` (gitignored; not in the repository). Required files:
 - `obs_transform.json` (column transforms for raw JAGS observations)
 - `model.onnx`, `likelihood.json`, `scalers.json`
 
-Optional: if `fixtures/MODEL_sl_regression.json` is present, `wire-to-jags`
-also runs numerical SL regression checks. Without that file, wiring still
-succeeds and only skips the regression step.
-
 ### Training (`results/MODEL/final_summary.json`)
 
 - `overall_r2` must be **>= 0.999** (the pipeline exits non-zero otherwise)

@@ -8,7 +8,7 @@ Implement a new model **SLUG** end to end:
 
 1. using the process information, define parameters, bounds, and summary statistics
 2. implement a stochastic simulator: `(params, n_trials, seed) -> summaries`
-3. register a multivariate `Model` spec with JAGS synthetic-likelihood hooks
+3. define a `Model` spec with JAGS synthetic-likelihood hooks and register it in `models/catalog.py`
 4. add a `scripts/SLUG/` pipeline (Makefile + run.py)
 5. add unit tests, including **parameter-sensitivity checks for every summary**
 6. run the full pipeline and confirm all gates pass
@@ -150,24 +150,21 @@ parameter has demonstrated sensitivity.
 
 Document which summary indices respond to which parameters in test docstrings.
 
-## Step 4: Define the multivariate Model spec
+## Step 4: Define the Model spec
 
-Create `models/<family>/<slug>mv.py` (or combine with Step 2 if small):
+In `models/<family>/<slug>.py` (or extend the simulator file from Step 2), add the
+`Model` instance. Follow `models/ddm/ddm3.py` or `models/social/dw.py`:
 
 ```python
-from asl.mv import build_sl_likelihood_line, emulator_output_names_for
+from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
-from models.<family>.<slug_base> import (
-    N_SUMMARIES, PARAM_BOUNDS, PARAM_NAMES, RECOVERY_PRIORS,
-    SUMMARY_NAMES, simulate_summaries,
-)
+# import simulator constants and simulate_summaries from the same module
 
-def build_<slug>_jags_likelihood(obs: dict) -> list[str]:
-    return build_sl_likelihood_line(
-        "SLUG", PARAM_NAMES, N_SUMMARIES,
-    )
+def build_jags_likelihood(obs: dict) -> list[str]:
+    del obs
+    return build_sl_likelihood_line("SLUG", PARAM_NAMES, N_SUMMARIES)
 
-<SLUG_UPPER>MV = Model(
+SLUG_MODEL = Model(
     slug="SLUG",
     param_names=PARAM_NAMES,
     param_bounds=PARAM_BOUNDS,
@@ -175,11 +172,17 @@ def build_<slug>_jags_likelihood(obs: dict) -> list[str]:
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,
-    build_jags_likelihood=build_<slug>_jags_likelihood,
+    build_jags_likelihood=build_jags_likelihood,
     default_architecture="DeepWide_32x6",   # or DeepWide_24x4
     default_n_epochs=10000,
 )
 ```
+
+If training draws need a different distribution than uniform `param_bounds`, set
+`draw_cov_parameters` (see `models/social/dw.py`). If recovery priors use a
+narrower support than training, set `prior_bounds` as well.
+
+Register the model in `models/catalog.py` (`get_model` lookup).
 
 Checklist:
 
@@ -188,23 +191,20 @@ Checklist:
 - `build_jags_likelihood` returns one line: `obs[1:p] ~ SLUG_sl(...)` (raw
   summaries; JNNX applies transforms from `obs_transform.json` at compile time)
 - `wire-to-jags` must succeed and produce `models/SLUG.jnnx/obs_transform.json`
-- `recovery_priors` use JAGS syntax consistent with `param_bounds`
+- `recovery_priors` use JAGS syntax consistent with inference bounds
 - `supports_recovery()` is True (automatic when hooks are set)
 - `n_outputs == n_summaries + n_summaries * (n_summaries + 1) // 2` (mu + chol)
 
-Use `source_slug` only if training data should live under a different directory
-name than `slug` (unusual; see `ddm3`).
-
 ## Step 5: Add the pipeline script and Makefile
 
-Copy `scripts/ddm3/run.py` to `scripts/SLUG/run.py`. Change:
-
-- `SLUG` constant
-- import and `register(...)` call for your `Model` instance
+Copy `scripts/ddm3/run.py` to `scripts/SLUG/run.py`. Change the imported
+`Model` constant (keep lazy step imports).
 
 Copy `scripts/ddm3/Makefile` to `scripts/SLUG/Makefile`. Change:
 
 - `MODEL := SLUG`
+
+For a paper example, also add `make SLUG` to the root `Makefile` (see `dw`).
 
 The four steps are fixed: `generate-data`, `train-emulator`, `wire-to-jags`,
 `confirm-recovery`. Do not add extra CLI modes.
@@ -216,7 +216,8 @@ Create `tests/test_<slug>.py` with at least:
 1. **Sensitivity tests** (Step 3) — one per parameter
 2. **Model spec tests** — `param_names`, `summary_names`, `slug`, `n_outputs`,
    `supports_recovery()`
-3. **Simulator sanity** — finite output for typical params, correct length
+3. **Catalog** — `get_model("SLUG")` returns your `Model` (see `tests/test_catalog.py`)
+4. **Simulator sanity** — finite output for typical params, correct length
 
 Run:
 
