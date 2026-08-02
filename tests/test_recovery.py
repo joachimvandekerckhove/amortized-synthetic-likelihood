@@ -11,6 +11,7 @@ from asl.recovery import (
     format_recovery_progress,
     recovery_report_interval,
     resolve_recovery_settings,
+    run_recovery_study,
 )
 
 
@@ -66,3 +67,32 @@ class TestCheckCoverageGate:
         coverages = [COVERAGE_HI] * toy_model.n_params
         with pytest.raises(SystemExit):
             check_coverage_gate(coverages, toy_model.param_names)
+
+
+class TestRunRecoveryStudy:
+    def test_sets_onnxruntime_lib_before_pool(self, toy_model, monkeypatch):
+        called = False
+
+        def fake_ensure():
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(
+            "asl.recovery.ensure_onnxruntime_lib_on_path",
+            fake_ensure,
+        )
+        monkeypatch.setattr(
+            "asl.recovery.resolve_recovery_settings",
+            lambda: {
+                "n_subjects": 0,
+                "n_trials": 10,
+                "n_iter": 10,
+                "n_burnin": 5,
+                "n_chains": 1,
+            },
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            run_recovery_study(toy_model)
+        assert called
+        assert exc.value.code == 1

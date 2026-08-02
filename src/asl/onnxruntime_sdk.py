@@ -127,3 +127,15 @@ def resolve_onnxruntime_sdk_dir(repo_root: Path | None = None) -> str:
         return str(path.resolve())
 
     return str(ensure_onnxruntime_sdk(repo_root))
+
+
+def ensure_onnxruntime_lib_on_path(repo_root: Path | None = None) -> str:
+    """Prepend the ONNX Runtime SDK lib/ directory to LD_LIBRARY_PATH for JAGS."""
+    lib_dir = str(Path(resolve_onnxruntime_sdk_dir(repo_root)) / "lib")
+    existing = os.environ.get("LD_LIBRARY_PATH", "")
+    parts = [part for part in existing.split(":") if part]
+    if lib_dir not in parts:
+        os.environ["LD_LIBRARY_PATH"] = (
+            f"{lib_dir}:{existing}" if existing else lib_dir
+        )
+    return lib_dir

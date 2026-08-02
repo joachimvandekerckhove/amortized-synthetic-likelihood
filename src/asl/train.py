@@ -194,8 +194,6 @@ def train_emulator(model: Model) -> None:
     config = load_config()
     slug = model.slug
     settings = resolve_training_settings()
-    if model.default_n_epochs is not None:
-        settings = {**settings, "n_epochs": model.default_n_epochs}
     rt_mask, _ = summary_column_masks(model)
     cov_lambda = float(config.get("training", "covariance_loss_weight", COV_LAMBDA))
 

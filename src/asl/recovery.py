@@ -14,6 +14,7 @@ from scipy.optimize import minimize
 from asl.config import load_config
 from asl.data import load_target_transform
 from asl.figures import plot_recovery_diagnostics
+from asl.onnxruntime_sdk import ensure_onnxruntime_lib_on_path
 from asl.spec import Model
 from models.catalog import get_model
 
@@ -252,6 +253,7 @@ def _recover_one_subject(args: tuple) -> dict | None:
 
 def run_recovery_study(model: Model) -> None:
     """Run a simulate-and-recover study."""
+    ensure_onnxruntime_lib_on_path()
     slug = model.slug
     settings = resolve_recovery_settings()
 

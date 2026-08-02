@@ -36,15 +36,16 @@ Each model follows the same four-stage pipeline:
 
 ## 1. Prerequisites
 
-- **Python 3.10+**
+- **Python 3.11+** (3.10 lacks stdlib `tomllib`)
 - **JAGS 4.x** — used by `py2jags` for Bayesian recovery
 - **g++** — needed to compile the JAGS module
+- **pkg-config** — JNNX module build locates JAGS headers
 - **make**
 
-Install JAGS on Debian/Ubuntu:
+Install on Debian/Ubuntu:
 
 ```bash
-sudo apt install jags
+sudo apt install jags pkg-config g++ make
 ```
 
 ## 2. Python environment
@@ -78,7 +79,8 @@ pytest
 Most users need no configuration. The first `wire-to-jags` step downloads the
 ONNX Runtime C/C++ SDK into `vendor/` automatically (headers and `lib/` for
 JAGS module compilation). The pip `onnxruntime` package is used separately for
-recovery inference.
+recovery inference. Recovery prepends the SDK `lib/` directory to
+`LD_LIBRARY_PATH` automatically; no manual export is needed.
 
 Optional overrides in `asl.toml`:
 

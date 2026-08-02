@@ -168,7 +168,17 @@ def _generate_jags_module_source(package_dir: Path) -> Path:
     return module_dir
 
 
+def _check_jags_build_prereqs() -> None:
+    if shutil.which("pkg-config"):
+        return
+    raise RuntimeError(
+        "pkg-config not found. JNNX needs it to locate JAGS module headers.\n"
+        "Debian/Ubuntu: sudo apt install jags pkg-config g++ make"
+    )
+
+
 def _compile_jags_module(module_dir: Path, env: dict) -> None:
+    _check_jags_build_prereqs()
     result = subprocess.run(
         ["make"], cwd=str(module_dir), env=env, capture_output=True, text=True
     )
@@ -214,9 +224,13 @@ def _install_jags_module(module_dir: Path, env: dict) -> None:
 
 
 def compile_and_install_module(package_dir: Path) -> Path:
-    from asl.onnxruntime_sdk import resolve_onnxruntime_sdk_dir
+    from asl.onnxruntime_sdk import (
+        ensure_onnxruntime_lib_on_path,
+        resolve_onnxruntime_sdk_dir,
+    )
 
     ort_dir = resolve_onnxruntime_sdk_dir()
+    ensure_onnxruntime_lib_on_path()
 
     module_dir = _generate_jags_module_source(package_dir)
     env = os.environ.copy()
@@ -240,3 +254,4 @@ def wire_to_jags(model: Model) -> None:
     compile_and_install_module(package_dir)
     dist = f"{slug}_sl" if _supports_sl_package(model) else f"{slug}_emulator"
     print(f"[wire] Installed JAGS module: {dist}")
+    print("[wire] ONNX Runtime lib on LD_LIBRARY_PATH for JAGS recovery")

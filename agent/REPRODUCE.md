@@ -33,16 +33,17 @@ Install before starting:
 
 | Requirement | Purpose |
 |---|---|
-| Python 3.10+ | pipeline runtime |
+| Python 3.11+ | pipeline runtime (`tomllib` in stdlib; 3.10 fails at import) |
 | `make` | orchestrates the four stages |
 | JAGS 4.x | Bayesian recovery via `py2jags` |
 | `g++` | compiles the JNNX JAGS module |
+| `pkg-config` | JNNX-generated Makefile locates JAGS headers |
 | ONNX Runtime C/C++ SDK | links the JAGS module to the ONNX emulator (auto-downloaded; see Configuration) |
 
 On Debian/Ubuntu:
 
 ```bash
-sudo apt install jags g++ make
+sudo apt install jags pkg-config g++ make
 ```
 
 The ONNX Runtime SDK is downloaded automatically into `vendor/` on the first
@@ -131,6 +132,39 @@ Recovery dominated total runtime. On the hardware above:
 | **Total** | about 5 hours |
 
 Report your own OS, Python, and GPU when filing issues or reproduction reports.
+
+### Clean-environment check (Turing, Docker)
+
+Independent validation on **turing.ss.uci.edu** (16 cores, 62 GiB RAM, Ubuntu 22.04 host,
+Docker 29.6.1). GPU on the host was not used (`nvidia-smi`: NVML driver/library
+version mismatch). Container image: `python:3.11-slim-bookworm` (Debian 12).
+
+| Stage | Result | Notes |
+|---|---|---|
+| `pip install -e ".[jags,dev]"` | pass | no extra steps |
+| `pytest` | pass | 77 tests |
+| `train-emulator` (ddm3, CPU) | pass | ~10 min at full 10k epochs; R² gate passes |
+| `wire-to-jags` | pass with `pkg-config` | without it: clear error from wire preflight |
+| `confirm-recovery` | pass | `LD_LIBRARY_PATH` set automatically in recovery |
+
+**Ubuntu 22.04 default Python (3.10):** `pytest` fails immediately with
+`ModuleNotFoundError: No module named 'tomllib'`. Use Python 3.11+ (e.g.
+`python:3.11-slim-bookworm` or Ubuntu 24.04).
+
+**`wire-to-jags` without `pkg-config`:** wire fails early with an install hint.
+JNNX's generated Makefile needs `pkg-config` to locate JAGS module headers.
+
+**Recovery / JAGS module load:** `recovery.py` prepends the ONNX Runtime SDK
+`lib/` directory to `LD_LIBRARY_PATH` before spawning JAGS. No manual export
+needed after `wire-to-jags`. If chains still fail, confirm with
+`ldd /usr/lib/x86_64-linux-gnu/JAGS/modules-4/ddm3_emulator.so` that
+`libonnxruntime.so.1` resolves.
+
+**Training epochs via `ASL_CONFIG`:** `[training] training_epochs` in
+`asl.toml` or `ASL_CONFIG` overrides the bundled default from `full.toml`.
+
+**Minimum subjects for recovery summary:** `confirm-recovery` needs at least three
+converged subjects to produce `recovery_summary.json` and run the coverage gate.
 
 ## Configuration
 
@@ -289,12 +323,15 @@ Diagnose in stage order:
 1. **`pytest` fails** — fix the Python environment before running the pipeline
 2. **`train-emulator` fails on R²** — check that committed training data is
    intact; try `make -C scripts/MODEL clean` and rerun
-3. **`wire-to-jags` fails** — confirm `onnxruntime_dir` if overridden, or run
-   `make bootstrap-ort`; ensure `g++` is installed
-4. **`confirm-recovery` fails coverage** — confirm the JAGS module compiled
+3. **`wire-to-jags` fails** — install `pkg-config` and `g++`; confirm
+   `onnxruntime_dir` if overridden, or run `make bootstrap-ort`
+4. **`confirm-recovery` fails with zero converged / chain exit codes** — rerun
+   `wire-to-jags`; check `ldd` on the installed `ddm3_emulator.so` for missing
+   `libonnxruntime.so.1` (recovery sets `LD_LIBRARY_PATH` automatically)
+5. **`confirm-recovery` fails coverage** — confirm the JAGS module compiled
    successfully and `wire-to-jags` was not skipped. Check
    `results/MODEL/recovery_summary.json` for which parameter failed
-5. **JAGS module not found** — rerun `wire-to-jags`; if `sudo make install`
+6. **JAGS module not found** — rerun `wire-to-jags`; if `sudo make install`
    failed, the pipeline falls back to `LTDL_LIBRARY_PATH` — check wire output
 
 Report back with:
