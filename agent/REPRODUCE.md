@@ -116,7 +116,7 @@ criteria are the same.
 
 | Command | Result on tested platform |
 |---|---|
-| `pytest` | 77 tests passed |
+| `pytest` | 80 tests passed |
 | `make all` | all four models: train + wire + recovery **PASS** |
 
 ### Observed wall time (`make all`)
@@ -136,16 +136,16 @@ Report your own OS, Python, and GPU when filing issues or reproduction reports.
 ### Clean-environment check (Turing, Docker)
 
 Independent validation on **turing.ss.uci.edu** (16 cores, 62 GiB RAM, Ubuntu 22.04 host,
-Docker 29.6.1). GPU on the host was not used (`nvidia-smi`: NVML driver/library
-version mismatch). Container image: `python:3.11-slim-bookworm` (Debian 12).
+Docker 29.6.1). Container image: `python:3.11-slim-bookworm` (Debian 12). Fresh
+`docker run --rm` after `git clone` from `origin/main` (commit `16109b6`).
 
 | Stage | Result | Notes |
 |---|---|---|
 | `pip install -e ".[jags,dev]"` | pass | no extra steps |
-| `pytest` | pass | 77 tests |
-| `train-emulator` (ddm3, CPU) | pass | ~10 min at full 10k epochs; R² gate passes |
+| `pytest` | pass | 80 tests |
+| `train-emulator` (ddm3, 50 epochs via `ASL_CONFIG`, CPU) | pass | ~3 s training |
 | `wire-to-jags` | pass with `pkg-config` | without it: clear error from wire preflight |
-| `confirm-recovery` | pass | `LD_LIBRARY_PATH` set automatically in recovery |
+| `confirm-recovery` (5 subjects, no manual `LD_LIBRARY_PATH`) | pass through summary | 5/5 converged; coverage gate fails on smoke training (expected) |
 
 **Ubuntu 22.04 default Python (3.10):** `pytest` fails immediately with
 `ModuleNotFoundError: No module named 'tomllib'`. Use Python 3.11+ (e.g.
