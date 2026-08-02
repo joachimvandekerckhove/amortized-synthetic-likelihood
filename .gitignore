@@ -7,4 +7,5 @@ results/
 figures/
 tmp/
 models/*.jnnx/
+vendor/
 .DS_Store

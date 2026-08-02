@@ -8,7 +8,7 @@ from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
 import numpy as np
-import onnxruntime as ort
+from asl.ort_env import cpu_inference_session
 from scipy.optimize import minimize
 
 from asl.config import load_config
@@ -122,7 +122,7 @@ def _compute_mle_initial_values(
     model: Model, z: np.ndarray, onnx_path: Path
 ) -> list[dict]:
     """MLE-based chain inits using the emulator mean head (internal standardized space)."""
-    session = ort.InferenceSession(str(onnx_path))
+    session = cpu_inference_session(onnx_path)
     n = model.n_summaries
 
     def neg_log_lik(params: np.ndarray) -> float:

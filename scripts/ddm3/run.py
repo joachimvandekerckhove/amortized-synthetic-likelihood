@@ -3,10 +3,6 @@
 
 import sys
 
-from asl.cov_data import generate_cov_dataset
-from asl.recovery import run_recovery_study
-from asl.train import train_emulator
-from asl.wire import wire_to_jags
 from models.ddm.ddm3 import DDM3
 
 STEPS = ("generate-data", "train-emulator", "wire-to-jags", "confirm-recovery")
@@ -19,12 +15,20 @@ def main() -> None:
 
     step = sys.argv[1]
     if step == "generate-data":
+        from asl.cov_data import generate_cov_dataset
+
         generate_cov_dataset(DDM3)
     elif step == "train-emulator":
+        from asl.train import train_emulator
+
         train_emulator(DDM3)
     elif step == "wire-to-jags":
+        from asl.wire import wire_to_jags
+
         wire_to_jags(DDM3)
     elif step == "confirm-recovery":
+        from asl.recovery import run_recovery_study
+
         run_recovery_study(DDM3)
 
 

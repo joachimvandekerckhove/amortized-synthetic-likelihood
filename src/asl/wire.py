@@ -10,7 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from asl.config import load_config
 from asl.data import write_obs_transform_json
 from asl.cholesky import emulator_error_cov_path, load_emulator_error_cov, n_chol
 from asl.spec import Model
@@ -215,13 +214,9 @@ def _install_jags_module(module_dir: Path, env: dict) -> None:
 
 
 def compile_and_install_module(package_dir: Path) -> Path:
-    ort_dir = str(load_config().get("wire", "onnxruntime_dir", "") or "")
-    if not ort_dir:
-        ort_dir = os.environ.get("ONNXRUNTIME_DIR", "")
-    if not ort_dir:
-        raise RuntimeError(
-            "wire.onnxruntime_dir not set in asl.toml (or ONNXRUNTIME_DIR env)"
-        )
+    from asl.onnxruntime_sdk import resolve_onnxruntime_sdk_dir
+
+    ort_dir = resolve_onnxruntime_sdk_dir()
 
     module_dir = _generate_jags_module_source(package_dir)
     env = os.environ.copy()

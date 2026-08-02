@@ -12,6 +12,7 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "matplotlib",
+    "torch",
     "onnx",
     "onnxruntime",
     "onnxscript",

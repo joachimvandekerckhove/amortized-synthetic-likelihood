@@ -6,7 +6,7 @@
 #   ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3 confirm-recovery
 
 [wire]
-# Set to the extracted ONNX Runtime SDK path (required for wire-to-jags).
+# Optional: override auto-downloaded SDK in vendor/ (see README).
 onnxruntime_dir = ""
 
 # Optional overrides (uncomment to replace default values):

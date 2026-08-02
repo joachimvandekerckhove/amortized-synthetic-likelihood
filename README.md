@@ -49,11 +49,14 @@ cd amortized-synthetic-likelihood
 python -m venv .venv
 source .venv/bin/activate
 
-# GPU training (Pascal / sm_61 GPUs such as GTX 1080 Ti)
-pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
-# CPU-only alternative: pip install torch
-
 pip install -e ".[jags,dev]"
+```
+
+`pip install` pulls PyTorch (CPU wheel). For GPU training on Pascal / sm\_61
+GPUs (e.g. GTX 1080 Ti), reinstall with the CUDA build:
+
+```bash
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
 ```
 
 Verify:
@@ -65,17 +68,23 @@ pytest
 
 ## 3. Configuration
 
-Edit `asl.toml` at the repo root:
+Most users need no configuration. The first `wire-to-jags` step downloads the
+ONNX Runtime C/C++ SDK into `vendor/` automatically (headers and `lib/` for
+JAGS module compilation). The pip `onnxruntime` package is used separately for
+recovery inference.
+
+Optional overrides in `asl.toml`:
 
 ```toml
 [wire]
-onnxruntime_dir = "/path/to/onnxruntime"  # required for wire-to-jags
+onnxruntime_dir = "/path/to/onnxruntime"  # skip auto-download
 ```
 
-Download the ONNX Runtime C/C++ SDK from
-https://github.com/microsoft/onnxruntime/releases and set `onnxruntime_dir`
-to the extracted directory (headers and `lib/` are required for JAGS module
-compilation; the pip `onnxruntime` package is used separately for training).
+Prefetch the SDK without running a full pipeline:
+
+```bash
+make bootstrap-ort
+```
 
 Default pipeline parameters live in `src/asl/presets/full.toml`. Override
 individual keys in `asl.toml` if needed. Layer scenario overrides via:
@@ -113,12 +122,19 @@ To regenerate: `make -C scripts/<model> generate-data`.
 If you already have `results/<model>/model.onnx` from a prior run, skip
 training and run only `make -C scripts/<model> wire-to-jags`.
 
+### Reference machine
+
+On a 32-core CPU with two NVIDIA GTX 1080 Ti GPUs, a full `make all` run
+(train + wire + recovery for all three models) took about four hours. Per-model
+recovery dominated wall time (ddm3 about 30 minutes, ddm4 about one hour,
+`ddmcollapsesig` about two hours). Your machine will differ.
+
 ### 4.1 Walkthrough: `ddm3` (step by step)
 
 ```bash
-make -C scripts/ddm3 train-emulator    # ~20 min GPU
+make -C scripts/ddm3 train-emulator
 make -C scripts/ddm3 wire-to-jags
-make -C scripts/ddm3 confirm-recovery    # ~2–4 h
+make -C scripts/ddm3 confirm-recovery
 ```
 
 Inference in JAGS uses one stochastic node:
@@ -209,6 +225,7 @@ scripts/<model>/Makefile            step targets
 models/ddm/                         model simulators and specs
 src/asl/                            pipeline library
 tests/                              unit tests (pytest)
+vendor/                             ONNX Runtime SDK (auto-downloaded, gitignored)
 agent/                              AI agent prompts (optional)
 ```
 
