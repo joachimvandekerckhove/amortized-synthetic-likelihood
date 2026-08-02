@@ -13,7 +13,7 @@ For most use cases, relatively cheap "frontier-adjacent" coding models suffice.
 
 | File | Use when |
 |---|---|
-| [`REPRODUCE.md`](REPRODUCE.md) | Running the existing pipeline for `ddm3mv`, `ddm4mv`, or `ddmcollapsesig` on a fresh machine and confirming results pass the automated gates |
+| [`REPRODUCE.md`](REPRODUCE.md) | Running the existing pipeline for `ddm3`, `ddm4`, or `ddmcollapsesig` on a fresh machine and confirming results pass the automated gates |
 | [`EXTEND.md`](EXTEND.md) | Implementing a **new** generative model and wiring it into the multivariate synthetic-likelihood framework |
 
 ## Placeholders
@@ -22,7 +22,7 @@ Replace these before sending the prompt:
 
 | Placeholder | Where | Meaning |
 |---|---|---|
-| `MODEL` | `REPRODUCE.md` | One of `ddm3mv`, `ddm4mv`, `ddmcollapsesig` |
+| `MODEL` | `REPRODUCE.md` | One of `ddm3`, `ddm4`, `ddmcollapsesig` |
 | `SLUG` | `EXTEND.md` | Short identifier for your new model (lowercase, no spaces), used in paths and JAGS node names |
 | `## The process` | `EXTEND.md` | Fill in this section with a detailed description of the generative process before sending |
 

@@ -14,7 +14,6 @@ from asl.config import (
     reset_config,
     set_config_data,
 )
-from asl.registry import register
 from asl.spec import Model
 
 
@@ -34,19 +33,17 @@ def repo_root() -> Path:
 
 @pytest.fixture
 def config_file(repo_root):
-    """Apply override fragments on top of bundled presets."""
+    """Apply override fragments on top of bundled defaults."""
 
     def _write(content: str) -> Path:
-        with open(repo_root / "asl.toml", "rb") as handle:
-            overrides = tomllib.load(handle)
+        with open(PRESETS_DIR / "full.toml", "rb") as handle:
+            defaults = tomllib.load(handle)
         if content.strip():
-            overrides = _deep_merge(overrides, tomllib.loads(content))
-        smoke = bool(overrides.get("run", {}).get("smoke", False))
-        preset_name = "smoke" if smoke else "full"
-        with open(PRESETS_DIR / f"{preset_name}.toml", "rb") as handle:
-            preset = tomllib.load(handle)
-        merged = _deep_merge(preset, overrides)
-        set_config_data(merged, overrides)
+            overrides = tomllib.loads(content)
+            merged = _deep_merge(defaults, overrides)
+        else:
+            merged = defaults
+        set_config_data(merged)
         return repo_root / "asl.toml"
 
     return _write
@@ -73,5 +70,4 @@ def toy_model() -> Model:
         default_architecture="DeepWide_24x4",
         default_n_epochs=100,
     )
-    register(model)
     return model

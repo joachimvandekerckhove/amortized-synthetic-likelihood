@@ -1,9 +1,4 @@
-"""
-asl.mv -- Shared helpers for multivariate emulator training and JAGS wiring.
-
-Defines the Cholesky upper-triangular layout used consistently by train_mv,
-export_mv, and the JAGS synthetic-likelihood nodes in multivariate model files.
-"""
+"""Cholesky layout, Stein loss, and JAGS synthetic-likelihood helpers."""
 
 import json
 from pathlib import Path
@@ -47,22 +42,7 @@ def std_cov_from_logcov(C1_z: np.ndarray, scale: np.ndarray) -> np.ndarray:
 def build_L_and_logdet(
     chol_raw: torch.Tensor, n: int
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Assemble upper-triangular L and logdet(Omega) from a flat chol head.
-
-    Parameters
-    ----------
-    chol_raw : torch.Tensor
-        Shape (batch, n_chol) or (n_chol,).  Diagonal entries receive softplus
-        before assembly so L has a positive diagonal.
-    n : int
-        Summary dimension.
-
-    Returns
-    -------
-    L : torch.Tensor of shape (batch, n, n)
-    logdet : torch.Tensor of shape (batch,)
-        log determinant of Omega = L^T L.
-    """
+    """Assemble upper-triangular L and logdet(Omega) from a flat chol head."""
     if chol_raw.dim() == 1:
         chol_raw = chol_raw.unsqueeze(0)
 
@@ -92,11 +72,7 @@ def cov_stein_loss(
     C1_std: torch.Tensor,
     n: int,
 ) -> torch.Tensor:
-    """Stein loss for per-trial precision: trace(P @ C1) - logdet(P).
-
-    Minimized at P = inv(C1_std) when C1_std is the per-trial covariance
-    in standardized summary space.
-    """
+    """Stein loss for per-trial precision: trace(P @ C1) - logdet(P)."""
     Omega = precision_from_chol(chol_raw, n)
     trace_term = torch.diagonal(torch.bmm(Omega, C1_std), dim1=1, dim2=2).sum(dim=1)
     _, logdet = build_L_and_logdet(chol_raw, n)
@@ -111,30 +87,10 @@ def build_sl_likelihood_line(
     obs_name: str = "obs",
     n_trials_name: str = "n_trials",
 ) -> list[str]:
-    """One-line JNNX v2 synthetic likelihood for raw physical summaries."""
+    """One-line JNNX synthetic likelihood for raw physical summaries."""
     args = ", ".join(param_names)
     dist = f"{slug}_sl"
     return [f"{obs_name}[1:{n_summaries}] ~ {dist}({args}, {n_trials_name})"]
-
-
-def build_mv_jags_likelihood_for_model(
-    slug: str,
-    param_names: tuple[str, ...],
-    n_summaries: int,
-    obs: dict | None = None,
-    *,
-    obs_name: str = "obs",
-    n_trials_name: str = "n_trials",
-) -> list[str]:
-    """Return synthetic-likelihood lines for one emulator."""
-    del obs  # reserved for condition-specific hooks
-    return build_sl_likelihood_line(
-        slug,
-        param_names,
-        n_summaries,
-        obs_name=obs_name,
-        n_trials_name=n_trials_name,
-    )
 
 
 def emulator_error_cov_path(slug: str) -> Path:
@@ -148,10 +104,7 @@ def debias_emulator_error_cov(
     n_rep: int,
     n_replicates: int,
 ) -> np.ndarray:
-    """Remove MC noise in z_mean targets from empirical emulator-error covariance.
-
-    Cov(mu_pred - z_mean_train) = Cov(b) + E[C1_std] / (R * n_rep).
-    """
+    """Remove MC noise in z_mean targets from empirical emulator-error covariance."""
     correction = np.asarray(mean_C1_std, dtype=np.float64) / (n_replicates * n_rep)
     sigma_emu = np.asarray(residual_cov, dtype=np.float64) - correction
     eigvals, eigvecs = np.linalg.eigh(sigma_emu)
@@ -188,15 +141,17 @@ def load_emulator_error_cov(slug: str) -> np.ndarray:
     if not path.exists():
         raise FileNotFoundError(
             f"Emulator error covariance not found at {path}. "
-            "Run train-emulator or compute_emulator_error_cov."
+            "Run train-emulator first."
         )
     with open(path) as f:
         payload = json.load(f)
     return np.array(payload["sigma_emu"], dtype=np.float64)
 
 
-def emulator_output_names_for(n_summaries: int, summary_names: tuple[str, ...]) -> tuple[str, ...]:
-    """Build the M ONNX output names for a multivariate emulator."""
+def emulator_output_names_for(
+    n_summaries: int, summary_names: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Build the M ONNX output names for an emulator (mean + Cholesky)."""
     mu_names = tuple(f"mu_{name}" for name in summary_names)
     chol_names = tuple(f"chol_{k + 1}" for k in range(n_chol(n_summaries)))
     return mu_names + chol_names

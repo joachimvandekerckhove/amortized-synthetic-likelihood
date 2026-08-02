@@ -1,4 +1,4 @@
-"""ONNX export for multivariate emulators."""
+"""ONNX export for emulators."""
 
 from pathlib import Path
 
@@ -7,11 +7,12 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
+from asl.cholesky import upper_tri_index_pairs
 from asl.data import TargetTransform, save_target_transform
 from asl.spec import Model
 
 
-class ExportMVModel(nn.Module):
+class ExportModel(nn.Module):
     """Wraps a dual-head network with baked-in input scaling."""
 
     def __init__(
@@ -28,11 +29,8 @@ class ExportMVModel(nn.Module):
         self.register_buffer("x_scale", torch.from_numpy(x_scale.astype(np.float32)))
 
     def forward(self, raw_params: torch.Tensor) -> torch.Tensor:
-        """Map raw parameters to [mu_std, chol_upper] in standardized space."""
         x_scaled = (raw_params - self.x_mean) / self.x_scale
         mu_std, chol_raw = self.net(x_scaled)
-
-        from asl.mv import upper_tri_index_pairs
 
         chol_upper = chol_raw.clone()
         for k, (i, j) in enumerate(upper_tri_index_pairs(self.n_summaries)):
@@ -42,17 +40,17 @@ class ExportMVModel(nn.Module):
         return torch.cat([mu_std, chol_upper], dim=1)
 
 
-def export_mv_onnx(
+def export_onnx(
     trained_net: nn.Module,
     x_scaler: StandardScaler,
     target_transform: TargetTransform,
     model: Model,
     output_path: Path,
 ) -> None:
-    """Export a multivariate emulator and persist its TargetTransform."""
+    """Export an emulator to ONNX and persist its target transform."""
     trained_net_cpu = trained_net.cpu().eval()
 
-    export_model = ExportMVModel(
+    export_model = ExportModel(
         trained_net=trained_net_cpu,
         x_mean=x_scaler.mean_,
         x_scale=x_scaler.scale_,

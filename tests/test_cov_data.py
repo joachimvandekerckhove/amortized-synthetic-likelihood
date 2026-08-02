@@ -7,9 +7,9 @@ import json
 import numpy as np
 
 from asl.cov_data import (
-    N_REP_FULL,
-    N_THETA_FULL,
-    R_FULL,
+    N_REP,
+    N_THETA,
+    R,
     SEED_DEFAULT,
     c1_column_names,
     cov_settings_path,
@@ -42,22 +42,10 @@ class TestColumnNames:
 
 
 class TestResolveCovSettings:
-    def test_full_defaults(self, config_file):
+    def test_defaults(self, config_file):
         config_file("")
         n_theta, n_rep, n_r, seed = resolve_cov_settings()
-        assert (n_theta, n_rep, n_r, seed) == (
-            N_THETA_FULL,
-            N_REP_FULL,
-            R_FULL,
-            SEED_DEFAULT,
-        )
-
-    def test_smoke_defaults(self, config_file):
-        config_file("[run]\nsmoke = true\n")
-        n_theta, n_rep, n_r, seed = resolve_cov_settings()
-        assert n_theta == 800
-        assert n_rep == 300
-        assert n_r == 40
+        assert (n_theta, n_rep, n_r, seed) == (N_THETA, N_REP, R, SEED_DEFAULT)
 
     def test_overrides(self, config_file):
         config_file(
@@ -101,6 +89,6 @@ class TestCovSettingsIO:
         assert payload == {"n_rep": 100, "R": 50, "seed": 11}
         assert load_cov_settings("toy") == (100, 50)
 
-    def test_load_missing_returns_full_defaults(self, tmp_path, monkeypatch):
+    def test_load_missing_returns_defaults(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        assert load_cov_settings("missing") == (N_REP_FULL, R_FULL)
+        assert load_cov_settings("missing") == (N_REP, R)

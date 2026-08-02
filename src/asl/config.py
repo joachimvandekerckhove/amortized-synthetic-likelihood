@@ -1,4 +1,4 @@
-"""Load pipeline configuration from preset and override TOML files."""
+"""Load pipeline configuration from TOML override files."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ DEFAULT_OVERRIDE_PATH = Path("asl.toml")
 CONFIG_PATH_ENV = "ASL_CONFIG"
 
 _config_path_override: Path | None = None
-_config_data_override: tuple[dict[str, Any], dict[str, Any]] | None = None
+_config_data_override: dict[str, Any] | None = None
 
 
 def set_config_path(path: Path | None) -> None:
@@ -24,13 +24,10 @@ def set_config_path(path: Path | None) -> None:
     load_config.cache_clear()
 
 
-def set_config_data(
-    merged: dict[str, Any],
-    overrides: dict[str, Any] | None = None,
-) -> None:
+def set_config_data(merged: dict[str, Any]) -> None:
     """Inject assembled configuration directly (for tests)."""
     global _config_data_override
-    _config_data_override = (merged, overrides if overrides is not None else {})
+    _config_data_override = merged
     load_config.cache_clear()
 
 
@@ -61,86 +58,51 @@ def _load_toml(path: Path) -> dict[str, Any]:
         return tomllib.load(handle)
 
 
-def _load_preset(smoke: bool) -> dict[str, Any]:
-    """Load the bundled full or smoke preset."""
-    name = "smoke" if smoke else "full"
-    path = PRESETS_DIR / f"{name}.toml"
-    if not path.exists():
-        raise FileNotFoundError(f"Preset file not found: {path}")
-    return _load_toml(path)
-
-
 def _resolve_override_path() -> Path:
     if _config_path_override is not None:
         return _config_path_override
     return DEFAULT_OVERRIDE_PATH
 
 
-def _load_override_layers() -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return merged override data and the user override file contents alone."""
+def _load_defaults() -> dict[str, Any]:
+    """Load the bundled defaults from full.toml."""
+    path = PRESETS_DIR / "full.toml"
+    if not path.exists():
+        raise FileNotFoundError(f"Defaults file not found: {path}")
+    return _load_toml(path)
+
+
+def _assemble_config() -> dict[str, Any]:
+    """Build merged runtime config from defaults + user overrides + ASL_CONFIG."""
+    defaults = _load_defaults()
     user = _load_toml(_resolve_override_path())
+    merged = _deep_merge(defaults, user)
     extra_path = os.environ.get(CONFIG_PATH_ENV)
     if extra_path:
         extra = _load_toml(Path(extra_path))
-        merged_overrides = _deep_merge(user, extra)
-    else:
-        merged_overrides = user
-    return merged_overrides, user
-
-
-def _assemble_config() -> tuple[dict[str, Any], dict[str, Any], Path]:
-    """Build merged runtime config from preset plus override layers."""
-    overrides, _user_only = _load_override_layers()
-    smoke = bool(overrides.get("run", {}).get("smoke", False))
-    preset = _load_preset(smoke)
-    merged = _deep_merge(preset, overrides)
-    return merged, overrides, _resolve_override_path()
+        merged = _deep_merge(merged, extra)
+    return merged
 
 
 class Config:
-    """Runtime view of preset values with user overrides applied."""
+    """Runtime view of pipeline configuration."""
 
-    def __init__(
-        self,
-        data: dict[str, Any],
-        overrides: dict[str, Any],
-        path: Path,
-    ) -> None:
+    def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
-        self._overrides = overrides
-        self.path = path
-
-    @property
-    def smoke(self) -> bool:
-        """True when [run].smoke is enabled in the override file."""
-        return bool(self._section("run").get("smoke", False))
-
-    def has(self, section: str, key: str) -> bool:
-        """True when section.key is set in a user override layer."""
-        override_section = self._overrides.get(section, {})
-        if not isinstance(override_section, dict):
-            return False
-        return key in override_section
 
     def get(self, section: str, key: str, default: Any = None) -> Any:
-        """Return the effective value after preset and override merging."""
-        sec = self._section(section)
+        """Return the effective value for section.key."""
+        sec = self._data.get(section, {})
+        if not isinstance(sec, dict):
+            raise TypeError(f"Config section [{section}] must be a table.")
         if key in sec:
             return sec[key]
         return default
 
-    def _section(self, name: str) -> dict[str, Any]:
-        value = self._data.get(name, {})
-        if not isinstance(value, dict):
-            raise TypeError(f"Config section [{name}] must be a table.")
-        return value
-
 
 @lru_cache(maxsize=1)
 def load_config() -> Config:
-    """Load and cache configuration from preset and override files."""
+    """Load and cache configuration."""
     if _config_data_override is not None:
-        merged, overrides = _config_data_override
-        return Config(merged, overrides, Path("test"))
-    merged, overrides, path = _assemble_config()
-    return Config(merged, overrides, path)
+        return Config(_config_data_override)
+    return Config(_assemble_config())

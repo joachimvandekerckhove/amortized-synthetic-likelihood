@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 import torch
 
@@ -38,40 +36,16 @@ class TestBuildArchitecture:
 
 
 class TestResolveTrainingSettings:
-    def test_full_defaults(self, config_file):
+    def test_defaults(self, config_file):
         config_file("")
         settings = resolve_training_settings()
         assert settings == {
-            "subsample": None,
             "n_epochs": 10000,
             "batch_size": 4096,
             "lr": 1e-3,
         }
 
-    def test_smoke_mode(self, config_file):
-        config_file("[run]\nsmoke = true\n")
-        settings = resolve_training_settings()
-        assert settings["subsample"] == 5000
-        assert settings["n_epochs"] == 300
-        assert settings["batch_size"] == 512
-
     def test_n_epochs_override(self, config_file):
         config_file("[training]\ntraining_epochs = 42\n")
         settings = resolve_training_settings()
         assert settings["n_epochs"] == 42
-
-    def test_smoke_with_n_epochs_override(self, config_file):
-        config_file("[run]\nsmoke = true\n\n[training]\ntraining_epochs = 99\n")
-        settings = resolve_training_settings()
-        assert settings["n_epochs"] == 99
-        assert settings["subsample"] == 5000
-
-
-class TestSelectDevice:
-    def test_unset_cuda_visible_devices_from_config(self, config_file, monkeypatch):
-        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
-        config_file("[device]\nunset_cuda_visible_devices = true\n")
-        import asl.mlp as mlp_module
-
-        importlib.reload(mlp_module)
-        assert "CUDA_VISIBLE_DEVICES" not in mlp_module.os.environ

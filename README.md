@@ -5,28 +5,33 @@ cognitive models with intractable likelihoods*. Three models are covered:
 
 | Model | Parameters | Summaries | Architecture | Epochs |
 |---|---|---|---|---|
-| `ddm3mv` | v, a, t0 | acc, rt\_mean, rt\_var | DeepWide\_24x4 | 10,000 |
-| `ddm4mv` | v, a, t0, w | rt\_mean/var (corr + err), err\_rate | DeepWide\_32x6 | 10,000 |
+| `ddm3` | v, a, t0 | acc, rt\_mean, rt\_var | DeepWide\_24x4 | 10,000 |
+| `ddm4` | v, a, t0, w | rt\_mean/var (corr + err), err\_rate | DeepWide\_32x6 | 10,000 |
 | `ddmcollapsesig` | a0, v, k, t0 | acc, rt quantiles (5th–95th, corr + err) | DeepWide\_32x6 | 10,000 |
 
 The `ddmcollapsesig` model has a sigmoid collapsing boundary
 `a(t) = a0 / (1 + exp(k t))`. The collapse rate k has no known forward
 equations relating it to observable statistics, which makes this model a
-natural showcase for the ASL approach. Setting k = 0 recovers constant bounds
-as a special case, so the emulator covers the full range k ∈ [0, 8] with a
-single network.
+natural showcase for the ASL approach.
 
-Each pipeline has four stages: generate training data → train dual-head
-emulator → compile into JAGS via JNNX → run simulate-and-recover.
+## How it works
 
+Each model follows the same four-stage pipeline:
+
+1. **Generate training data** — draw parameters uniformly and simulate summary
+   statistics (with replicate-based covariances) across the parameter space.
+2. **Train emulator** — fit a dual-head neural network that predicts summary
+   means and covariances from parameters.
+3. **Wire to JAGS** — compile the trained network into a JAGS module that
+   provides a synthetic likelihood for Bayesian inference.
+4. **Recover** — simulate-and-recover study (500 synthetic subjects) to
+   confirm the emulator supports valid inference.
 
 ## 1. Prerequisites
 
-### System packages
-
 - **Python 3.10+**
 - **JAGS 4.x** — used by `py2jags` for Bayesian recovery
-- **g++** — needed by JNNX to compile the JAGS module
+- **g++** — needed to compile the JAGS module
 - **make**
 
 Install JAGS on Debian/Ubuntu:
@@ -34,19 +39,6 @@ Install JAGS on Debian/Ubuntu:
 ```bash
 sudo apt install jags
 ```
-
-### ONNX Runtime (for JNNX module compilation)
-
-The wiring step compiles a C++ JAGS module that links against ONNX Runtime.
-Download a pre-built release:
-
-```bash
-# Example: ONNX Runtime 1.18.0 for Linux x86-64
-wget https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-linux-x64-1.18.0.tgz
-tar xf onnxruntime-linux-x64-1.18.0.tgz
-# Note the path, e.g. /opt/onnxruntime-linux-x64-1.18.0
-```
-
 
 ## 2. Python environment
 
@@ -57,81 +49,85 @@ cd amortized-synthetic-likelihood
 python -m venv .venv
 source .venv/bin/activate
 
-# GPU training (Pascal / sm_61 GPUs such as GTX 1080 Ti — use this exact wheel)
+# GPU training (Pascal / sm_61 GPUs such as GTX 1080 Ti)
 pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
 # CPU-only alternative: pip install torch
 
 pip install -e ".[jags,dev]"
 ```
 
-The `jags` extra installs `py2jags` and `jnnx` (JNNX v2.0.0) from GitHub.
-The `dev` extra adds `pytest`.
-
-Verify the installation:
+Verify:
 
 ```bash
 python -c "import asl; import jnnx; print('OK')"
-pytest          # 70 tests, ~3 s
+pytest
 ```
-
 
 ## 3. Configuration
 
-Edit `asl.toml` at the repo root before running anything:
+Edit `asl.toml` at the repo root:
 
 ```toml
-[run]
-smoke = false       # set true for a fast smoke test (~5 min total)
-
 [wire]
-onnxruntime_dir = "/opt/onnxruntime-linux-x64-1.18.0"  # <-- set this
+onnxruntime_dir = "/path/to/onnxruntime"  # required for wire-to-jags
 ```
 
-All other pipeline parameters (epoch counts, batch size, subject counts, etc.)
-are set in `src/asl/presets/full.toml`. Do not edit that file; use `asl.toml`
-to override individual keys.
+Download the ONNX Runtime C/C++ SDK from
+https://github.com/microsoft/onnxruntime/releases and set `onnxruntime_dir`
+to the extracted directory (headers and `lib/` are required for JAGS module
+compilation; the pip `onnxruntime` package is used separately for training).
 
-Full-scale defaults (active when `smoke = false`):
+Default pipeline parameters live in `src/asl/presets/full.toml`. Override
+individual keys in `asl.toml` if needed. Layer scenario overrides via:
 
-| Parameter | Value |
+```bash
+ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3 confirm-recovery
+```
+
+| Parameter | Default |
 |---|---|
 | `training_epochs` | 10,000 |
 | `batch_size` | 4,096 |
-| `learning_rate` | 0.001 |
 | `parameter_draws` (training data) | 20,000 |
 | `trials_per_replicate` | 600 |
 | `replicates_per_parameter` | 120 |
 | `synthetic_subjects` (recovery) | 500 |
 | `trials_per_subject` (recovery) | 500 |
 
-Smoke-test defaults (active when `smoke = true`): 300 epochs, 800 parameter
-draws, 50 recovery subjects. Use smoke mode for a quick sanity check before
-committing to the full run.
-
-
 ## 4. Reproduction steps
 
-All commands are run from the **repo root**.  Make targets handle dependency
-ordering: a target only runs if its output file is missing.
+All commands run from the **repo root**.
 
-### 4.1 Example 1: three-parameter DDM (`ddm3mv`)
-
-Training data is already committed to `data/ddm3mv/cov_train.csv`
-(20,000 parameter draws). To regenerate from scratch (slow, ~30 min):
+### Quick start
 
 ```bash
-make -C scripts/ddm3mv generate-data
+make ddm3              # full pipeline for 3-parameter DDM
+make ddm4              # full pipeline for 4-parameter DDM
+make ddmcollapsesig    # full pipeline for collapsing-bounds DDM
+make all               # all three models
 ```
 
-Train the emulator (~20 min on GPU, longer on CPU):
+Training data is committed for all three models (`data/<model>/cov_train.csv`).
+To regenerate: `make -C scripts/<model> generate-data`.
+
+If you already have `results/<model>/model.onnx` from a prior run, skip
+training and run only `make -C scripts/<model> wire-to-jags`.
+
+### 4.1 Walkthrough: `ddm3` (step by step)
 
 ```bash
-make -C scripts/ddm3mv train-emulator
+make -C scripts/ddm3 train-emulator    # ~20 min GPU
+make -C scripts/ddm3 wire-to-jags
+make -C scripts/ddm3 confirm-recovery    # ~2–4 h
 ```
 
-Output: `results/ddm3mv/model.onnx`, `results/ddm3mv/final_summary.json`
+Inference in JAGS uses one stochastic node:
 
-Expected emulator accuracy:
+```
+obs[1:3] ~ ddm3_sl(v, a, t0, n_trials)
+```
+
+Expected emulator accuracy (reference machine):
 
 | Summary | R² |
 |---|---|
@@ -140,29 +136,7 @@ Expected emulator accuracy:
 | log(1 + Var[RT]) | 0.99978 |
 | Overall | 0.99992 |
 
-Compile the ONNX emulator into a JAGS synthetic-likelihood module:
-
-```bash
-make -C scripts/ddm3mv wire-to-jags
-```
-
-Output: `models/ddm3mv.jnnx/` package (including `obs_transform.json` for
-JNNX v2 raw-summary transforms), JAGS module installed system-wide.
-Inference in JAGS uses one stochastic node with **raw** summary statistics:
-
-```
-obs[1:3] ~ ddm3mv_sl(v, a, t0, n_trials)
-```
-
-Run the simulate-and-recover study (500 subjects × 500 trials, ~2–4 h):
-
-```bash
-make -C scripts/ddm3mv confirm-recovery
-```
-
-Output: `results/ddm3mv/recovery_summary.json`
-
-Expected result (500/500 converged, all Rhat < 1.01):
+Expected recovery (MCMC is stochastic; expect small differences across machines):
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
@@ -170,33 +144,19 @@ Expected result (500/500 converged, all Rhat < 1.01):
 | a | 0.995 | 0.944 |
 | t0 | 0.977 | 0.938 |
 
-Run all four steps in sequence with one command:
+High-N supplemental recovery (50 subjects × 10,000 trials):
 
 ```bash
-make -C scripts/ddm3mv all
+ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3 confirm-recovery
 ```
 
-**High-N supplemental recovery** (50 subjects × 10,000 trials):
+### 4.2 `ddm4`
 
 ```bash
-ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3mv confirm-recovery
+make ddm4
 ```
 
-### 4.2 Example 2: four-parameter DDM (`ddm4mv`)
-
-Identical pipeline. Training data committed to `data/ddm4mv/cov_train.csv`.
-
-```bash
-make -C scripts/ddm4mv all
-# or step by step:
-make -C scripts/ddm4mv train-emulator
-make -C scripts/ddm4mv wire-to-jags
-make -C scripts/ddm4mv confirm-recovery
-```
-
-Output: `results/ddm4mv/recovery_summary.json`
-
-Expected result (498/500 converged):
+Expected recovery:
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
@@ -205,43 +165,19 @@ Expected result (498/500 converged):
 | t0 | 0.971 | 0.950 |
 | w | 0.990 | 0.964 |
 
-High-N:
+### 4.3 `ddmcollapsesig`
 
 ```bash
-ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm4mv confirm-recovery
+make ddmcollapsesig
 ```
 
-### 4.3 Example 3: collapsing-bounds DDM (`ddmcollapsesig`)
-
-This model has a sigmoid collapsing boundary `a(t) = a0 / (1 + exp(k t))`.
-The collapse rate k does not appear in any known closed-form expression for
-response-time statistics, so likelihood-based inference is not possible without
-an emulator. Training data is committed to `data/ddmcollapsesig/cov_train.csv`.
-To regenerate from scratch (~45 min):
-
-```bash
-make -C scripts/ddmcollapsesig generate-data
-```
-
-Run the full pipeline (~40 min train on GPU + ~3–5 h recovery):
-
-```bash
-make -C scripts/ddmcollapsesig all
-# or step by step:
-make -C scripts/ddmcollapsesig train-emulator
-make -C scripts/ddmcollapsesig wire-to-jags
-make -C scripts/ddmcollapsesig confirm-recovery
-```
-
-Inference uses one stochastic node:
+Inference:
 
 ```
 obs[1:10] ~ ddmcollapsesig_sl(a0, v, k, t0, n_trials)
 ```
 
-Output: `results/ddmcollapsesig/recovery_summary.json`
-
-Expected result (comparable to reference machine; MCMC is stochastic):
+Expected recovery:
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
@@ -250,71 +186,47 @@ Expected result (comparable to reference machine; MCMC is stochastic):
 | k | 0.958 | 0.940 |
 | t0 | 0.994 | 0.962 |
 
-
 ## 5. Coverage gates
 
 Each recovery study applies an automated gate: every parameter's empirical
 95% CI coverage must fall in **(0.90, 0.99)**. The pipeline exits non-zero
-and prints a diagnostic if any parameter fails. All three examples pass with
-the committed emulators and the default full-scale settings.
-
+if any parameter fails. All three examples pass with the default settings.
 
 ## 6. Repository layout
 
 ```
 asl.toml                            user overrides (edit this)
-src/asl/presets/full.toml           full-scale preset (do not edit)
-src/asl/presets/smoke.toml          smoke preset (do not edit)
-configs/recovery_highn.toml         high-N scenario override
+src/asl/presets/full.toml           default parameters (do not edit)
+configs/recovery_highn.toml         high-N recovery override
+Makefile                            top-level entrypoint (make ddm3, etc.)
 
-data/<model>/cov_train.csv          training data (committed for all three models)
+data/<model>/cov_train.csv          training data (committed)
 data/<model>/cov_settings.json      metadata: n_rep, R, seed
 
-models/<model>.jnnx/                JAGS wiring package (generated by wire-to-jags)
-  metadata.json                       JNNX package manifest (version 2.0.0)
-  obs_transform.json                  column transforms for raw JAGS observations
-  likelihood.json                     sigma_emu (emulator residual covariance)
-  model.onnx                          trained ONNX emulator
-  scalers.{json,pkl}                  I/O scaling metadata
+scripts/<model>/run.py              pipeline entry point
+scripts/<model>/Makefile            step targets
 
-results/<model>/model.onnx          trained emulator (generated)
-results/<model>/final_summary.json  training metrics (generated)
-results/<model>/recovery_summary.json recovery metrics (generated)
-
-scripts/<model>/Makefile            pipeline targets
-scripts/<model>/run.py              step dispatcher
-
+models/ddm/                         model simulators and specs
 src/asl/                            pipeline library
-  config.py                         TOML configuration loader
-  cov_data.py                       training-data generator
-  data.py                           dataset loading and target transforms
-  export_mv.py                      ONNX export
-  figures.py                        recovery diagnostic plots
-  mlp.py                            network architectures (DeepWide MLP)
-  mv.py                             Cholesky math and SL likelihood helpers
-  recovery.py                       recovery study utilities
-  recovery_mv.py                    multivariate simulate-and-recover
-  registry.py                       model registry
-  spec.py                           Model dataclass
-  train_mv.py                       dual-head emulator training
-  wire.py                           JNNX package assembly and JAGS wiring
-
-models/ddm/                         model definitions
-  simulator.py                      Euler DDM simulator
-  ddm3.py  ddm4.py                  scalar model specs
-  ddm3mv.py  ddm4mv.py              multivariate emulator model specs
-  ddmcollapsesig.py                 collapsing-bounds simulator and summaries
-  ddmcollapsesigmv.py               collapsing-bounds multivariate emulator spec
-
 tests/                              unit tests (pytest)
+agent/                              AI agent prompts (optional)
 ```
 
+Running the pipeline also produces `results/`, `models/*.jnnx/`, and
+`figures/` (all gitignored).
 
-## 7. Tests
+## 7. Cleaning artifacts
+
+```bash
+make -C scripts/ddm3 clean-generated   # remove gitignored outputs only
+make -C scripts/ddm3 clean               # also removes committed training data (prompts for confirmation)
+```
+
+## 8. Tests
 
 ```bash
 pytest
 ```
 
-70 tests covering the configuration system, data loading, MLP architectures,
-Cholesky math, emulator training helpers, and the model registry.
+Unit tests cover configuration, data loading, Cholesky math, emulator
+training helpers, and model simulators.

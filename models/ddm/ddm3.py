@@ -3,26 +3,30 @@ models.ddm.ddm3 -- Three-parameter drift diffusion model.
 
 Parameters: drift rate (v), boundary separation (a), nondecision time (t0).
 Starting bias is fixed at w = 0.5 (unbiased).
-Summaries: accuracy (proportion correct), mean RT, variance of RT.
-
-Parameter ranges match the reference implementation (Chavez De la Pena &
-Vandekerckhove 2025) to ensure numerically well-behaved recovery:
-  v  in (-2, 2)    -- avoids near-0% / near-100% accuracy extremes
-  a  in (0.5, 2.0) -- realistic boundary separations
-  t0 in (0.15, 0.45) -- typical nondecision times in cognitive experiments
+Summaries: accuracy, mean RT, variance of RT.
 """
 
 import numpy as np
 
+from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
 from models.ddm.simulator import simulate_ddm_paths_biased
 
 FIXED_BIAS = 0.5
 
+PARAM_NAMES = ("v", "a", "t0")
+PARAM_BOUNDS = ((-2.0, 2.0), (0.5, 2.0), (0.15, 0.45))
+SUMMARY_NAMES = ("acc", "rt_mean", "rt_var")
+N_SUMMARIES = len(SUMMARY_NAMES)
 
-def simulate_summaries_ddm3(
-    params: np.ndarray, n_trials: int, seed: int
-) -> np.ndarray:
+RECOVERY_PRIORS = {
+    "v": "v ~ dnorm(0, 0.25)",
+    "a": "a ~ dunif(0.3, 2.5)",
+    "t0": "t0 ~ dunif(0.1, 0.5)",
+}
+
+
+def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
     """Simulate summary statistics for the 3-parameter DDM."""
     v, a, t0 = float(params[0]), float(params[1]), float(params[2])
 
@@ -46,15 +50,20 @@ def simulate_summaries_ddm3(
     return np.array([accuracy, rt_mean, rt_var])
 
 
+def build_jags_likelihood(obs: dict) -> list[str]:
+    del obs
+    return build_sl_likelihood_line("ddm3", PARAM_NAMES, N_SUMMARIES)
+
+
 DDM3 = Model(
     slug="ddm3",
-    param_names=("v", "a", "t0"),
-    param_bounds=((-2.0, 2.0), (0.5, 2.0), (0.15, 0.45)),
-    summary_names=("acc", "rt_mean", "rt_var"),
-    simulate_summaries=simulate_summaries_ddm3,
-    recovery_priors={
-        "v": "v ~ dnorm(0, 0.25)",
-        "a": "a ~ dunif(0.3, 2.5)",
-        "t0": "t0 ~ dunif(0.1, 0.5)",
-    },
+    param_names=PARAM_NAMES,
+    param_bounds=PARAM_BOUNDS,
+    summary_names=SUMMARY_NAMES,
+    emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
+    simulate_summaries=simulate_summaries,
+    recovery_priors=RECOVERY_PRIORS,
+    build_jags_likelihood=build_jags_likelihood,
+    default_architecture="DeepWide_24x4",
+    default_n_epochs=10000,
 )

@@ -7,8 +7,6 @@ import pytest
 from asl.recovery import (
     COVERAGE_HI,
     COVERAGE_LO,
-    N_SUBJECTS_FULL,
-    N_SUBJECTS_SMOKE,
     check_coverage_gate,
     format_recovery_progress,
     recovery_report_interval,
@@ -39,17 +37,12 @@ class TestRecoveryReportInterval:
 
 
 class TestResolveRecoverySettings:
-    def test_full_defaults(self, config_file):
+    def test_defaults(self, config_file):
         config_file("")
         settings = resolve_recovery_settings()
-        assert settings["n_subjects"] == N_SUBJECTS_FULL
+        assert settings["n_subjects"] == 500
         assert settings["n_trials"] == 500
         assert settings["n_chains"] == 4
-
-    def test_smoke_defaults(self, config_file):
-        config_file("[run]\nsmoke = true\n")
-        settings = resolve_recovery_settings()
-        assert settings["n_subjects"] == N_SUBJECTS_SMOKE
 
     def test_overrides(self, config_file):
         config_file("[recovery]\nsynthetic_subjects = 12\ntrials_per_subject = 99\n")

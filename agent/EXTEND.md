@@ -17,20 +17,20 @@ Success means:
 
 - `pytest` passes (including your new tests)
 - smoke pipeline completes (`asl.toml`: `[run] smoke = true`)
-- full pipeline completes with `[train_mv] PASS` (R² >= threshold) and
-  `[recovery_mv] PASS` (all coverages in **(0.90, 0.99)**)
+- full pipeline completes with `[train] PASS` (R² >= threshold) and
+  `[recovery] PASS` (all coverages in **(0.90, 0.99)**)
 
 ## Required reading (in order)
 
 Study these existing models as templates (simplest to more complex):
 
-1. `models/ddm/ddm3.py` + `models/ddm/ddm3mv.py` — three summaries, three params
+1. `models/ddm/ddm3.py` + `models/ddm/ddm3.py` — three summaries, three params
 2. `models/ddm/ddmcollapsesig.py` + `models/ddm/ddmcollapsesigmv.py` — ten
    summaries, four params, parameter-sensitivity tests
 3. `src/asl/spec.py` — `Model` dataclass contract
 4. `src/asl/data.py` — how summary names map to log1p transforms
 5. `src/asl/mv.py` — `build_sl_likelihood_line`, `emulator_output_names_for`
-6. `scripts/ddm3mv/run.py` and `scripts/ddm3mv/Makefile` — pipeline wiring
+6. `scripts/ddm3/run.py` and `scripts/ddm3/Makefile` — pipeline wiring
 7. `tests/test_ddmcollapsesig.py` — sensitivity and model-spec tests
 8. `agent/REPRODUCE.md` — environment setup and gate definitions
 
@@ -190,20 +190,20 @@ Checklist:
   summaries; JNNX applies transforms from `obs_transform.json` at compile time)
 - `wire-to-jags` must succeed and produce `models/SLUG.jnnx/obs_transform.json`
 - `recovery_priors` use JAGS syntax consistent with `param_bounds`
-- `supports_mv_recovery()` is True (automatic when hooks are set)
+- `supports_recovery()` is True (automatic when hooks are set)
 - `n_outputs == n_summaries + n_summaries * (n_summaries + 1) // 2` (mu + chol)
 
 Use `source_slug` only if training data should live under a different directory
-name than `slug` (unusual; see `ddm3mv`).
+name than `slug` (unusual; see `ddm3`).
 
 ## Step 5: Add the pipeline script and Makefile
 
-Copy `scripts/ddm3mv/run.py` to `scripts/SLUG/run.py`. Change:
+Copy `scripts/ddm3/run.py` to `scripts/SLUG/run.py`. Change:
 
 - `SLUG` constant
 - import and `register(...)` call for your `Model` instance
 
-Copy `scripts/ddm3mv/Makefile` to `scripts/SLUG/Makefile`. Change:
+Copy `scripts/ddm3/Makefile` to `scripts/SLUG/Makefile`. Change:
 
 - `MODEL := SLUG`
 
@@ -216,7 +216,7 @@ Create `tests/test_<slug>.py` with at least:
 
 1. **Sensitivity tests** (Step 3) — one per parameter
 2. **Model spec tests** — `param_names`, `summary_names`, `slug`, `n_outputs`,
-   `supports_mv_recovery()`
+   `supports_recovery()`
 3. **Simulator sanity** — finite output for typical params, correct length
 
 Run:
@@ -270,7 +270,7 @@ Verify:
 
 - `data/SLUG/cov_train.csv` created
 - `results/SLUG/final_summary.json` — R² >= 0.995 (smoke threshold)
-- `results/SLUG/recovery_summary.json` — pipeline prints `[recovery_mv] PASS`
+- `results/SLUG/recovery_summary.json` — pipeline prints `[recovery] PASS`
 
 If smoke fails, fix the simulator or summaries before enabling full mode. Common
 causes: too many NaN rows in training data, summaries not sensitive to params,

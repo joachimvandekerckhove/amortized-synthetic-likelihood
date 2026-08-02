@@ -1,4 +1,4 @@
-"""Unit tests for asl.mv."""
+"""Unit tests for asl.cholesky."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ import numpy as np
 import pytest
 import torch
 
-from asl.mv import (
+from asl.cholesky import (
     build_L_and_logdet,
-    build_mv_jags_likelihood_for_model,
     build_sl_likelihood_line,
     cov_stein_loss,
     debias_emulator_error_cov,
@@ -102,14 +101,8 @@ class TestEmulatorErrorCov:
 
 class TestJagsHelpers:
     def test_build_sl_likelihood_line(self):
-        lines = build_sl_likelihood_line("ddm3mv", ("v", "a", "t0"), 3)
-        assert lines == ["obs[1:3] ~ ddm3mv_sl(v, a, t0, n_trials)"]
-
-    def test_build_mv_jags_likelihood_for_model(self):
-        lines = build_mv_jags_likelihood_for_model(
-            "ddm3mv", ("v", "a", "t0"), 3, {}
-        )
-        assert "ddm3mv_sl" in lines[0]
+        lines = build_sl_likelihood_line("ddm3", ("v", "a", "t0"), 3)
+        assert lines == ["obs[1:3] ~ ddm3_sl(v, a, t0, n_trials)"]
 
     def test_emulator_output_names(self):
         names = emulator_output_names_for(2, ("acc", "rt"))

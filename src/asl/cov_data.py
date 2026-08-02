@@ -1,5 +1,5 @@
 """
-asl.cov_data -- Replicate-based per-trial covariance training data for MV models.
+asl.cov_data -- Replicate-based per-trial covariance training data.
 
 For each parameter draw theta, simulates R replicate datasets at n_rep trials,
 computes log1p-space summary means and per-trial covariances, and streams rows
@@ -9,9 +9,8 @@ Usage:
     Called from scripts/<model>/run.py generate-data
 
 Configuration:
-    [run] smoke in asl.toml; presets in src/asl/presets/
     [cov_data] parameter_draws, trials_per_replicate, replicates_per_parameter,
-               random_seed, parallel_workers
+               random_seed, parallel_workers  (in asl.toml)
 """
 
 import json
@@ -24,17 +23,14 @@ import pandas as pd
 
 from asl.config import load_config
 from asl.data import summary_column_masks
-from asl.mv import pack_upper_tri, upper_tri_index_pairs
-from asl.registry import get_model
+from asl.cholesky import pack_upper_tri, upper_tri_index_pairs
 from asl.spec import Model
+from models.catalog import get_model
 
 SEED_DEFAULT = 42
-N_THETA_FULL = 20_000
-N_THETA_SMOKE = 800
-N_REP_FULL = 600
-N_REP_SMOKE = 300
-R_FULL = 120
-R_SMOKE = 40
+N_THETA = 20_000
+N_REP = 600
+R = 120
 CHUNK_SIZE = 200
 
 
@@ -62,15 +58,15 @@ def load_cov_settings(slug: str) -> tuple[int, int]:
         with open(path) as f:
             payload = json.load(f)
         return int(payload["n_rep"]), int(payload["R"])
-    return N_REP_FULL, R_FULL
+    return N_REP, R
 
 
 def resolve_cov_settings() -> tuple[int, int, int, int]:
     """Return n_theta, n_rep, R, seed from TOML configuration."""
     config = load_config()
-    n_theta = int(config.get("cov_data", "parameter_draws", N_THETA_FULL))
-    n_rep = int(config.get("cov_data", "trials_per_replicate", N_REP_FULL))
-    n_r = int(config.get("cov_data", "replicates_per_parameter", R_FULL))
+    n_theta = int(config.get("cov_data", "parameter_draws", N_THETA))
+    n_rep = int(config.get("cov_data", "trials_per_replicate", N_REP))
+    n_r = int(config.get("cov_data", "replicates_per_parameter", R))
     seed = int(config.get("cov_data", "random_seed", SEED_DEFAULT))
     return n_theta, n_rep, n_r, seed
 
@@ -150,9 +146,9 @@ def expected_columns(model: Model) -> list[str]:
     )
 
 
-def generate_cov_dataset(slug: str) -> None:
-    """Generate replicate-based covariance training data for a multivariate model."""
-    model = get_model(slug)
+def generate_cov_dataset(model: Model) -> None:
+    """Generate replicate-based covariance training data."""
+    slug = model.slug
     n_theta, n_rep, n_r, seed = resolve_cov_settings()
     n_workers = resolve_cov_workers()
 
@@ -205,19 +201,10 @@ def generate_cov_dataset(slug: str) -> None:
 
 
 def load_cov_dataset(
-    slug: str, subsample: int | None = None, seed: int = 42
+    model: Model, subsample: int | None = None, seed: int = 42
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Model]:
-    """Load cov_train.csv and return arrays for multivariate training.
-
-    Returns
-    -------
-    X : np.ndarray of shape (n_rows, n_params)
-    z_mean : np.ndarray of shape (n_rows, n_summaries), log1p space
-    C1_z : np.ndarray of shape (n_rows, n_chol), per-trial cov in log1p space
-    y_raw : np.ndarray of shape (n_rows, n_summaries), physical units for R^2
-    model : Model
-    """
-    model = get_model(slug)
+    """Load cov_train.csv and return arrays for training."""
+    slug = model.slug
     data_path = Path("data") / slug / "cov_train.csv"
     if not data_path.exists():
         raise FileNotFoundError(f"Covariance training data not found: {data_path}")

@@ -10,7 +10,7 @@ from models.ddm.ddmcollapsesig import (
     collapse_bound,
     simulate_summaries,
 )
-from models.ddm.ddmcollapsesigmv import DDMCOLLAPSESIGMV
+from models.ddm.ddmcollapsesig import DDMCOLLAPSESIG
 
 
 class TestCollapseBound:
@@ -45,8 +45,8 @@ class TestSimulator:
 
 class TestModelSpec:
     def test_parameter_layout(self):
-        assert DDMCOLLAPSESIGMV.param_names == PARAM_NAMES
-        assert DDMCOLLAPSESIGMV.summary_names == SUMMARY_NAMES
-        assert DDMCOLLAPSESIGMV.n_outputs == 65
-        assert DDMCOLLAPSESIGMV.supports_mv_recovery()
-        assert DDMCOLLAPSESIGMV.slug == "ddmcollapsesig"
+        assert DDMCOLLAPSESIG.param_names == PARAM_NAMES
+        assert DDMCOLLAPSESIG.summary_names == SUMMARY_NAMES
+        assert DDMCOLLAPSESIG.n_outputs == 65
+        assert DDMCOLLAPSESIG.supports_recovery()
+        assert DDMCOLLAPSESIG.slug == "ddmcollapsesig"

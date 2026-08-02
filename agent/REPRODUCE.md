@@ -105,8 +105,8 @@ Rules:
 
 | Model | Architecture | Committed training data? | Typical GPU time |
 |---|---|---|---|
-| `ddm3mv` | DeepWide_24x4 | yes (`data/ddm3mv/`) | ~20 min train + ~2–4 h recovery |
-| `ddm4mv` | DeepWide_32x6 | yes (`data/ddm4mv/`) | ~20 min train + ~2–4 h recovery |
+| `ddm3` | DeepWide_24x4 | yes (`data/ddm3/`) | ~20 min train + ~2–4 h recovery |
+| `ddm4` | DeepWide_32x6 | yes (`data/ddm4/`) | ~20 min train + ~2–4 h recovery |
 | `ddmcollapsesig` | DeepWide_32x6 | yes (`data/ddmcollapsesig/`) | ~40 min train + ~3–5 h recovery |
 
 Training data generation (`make -C scripts/MODEL generate-data`) is optional
@@ -172,13 +172,13 @@ Reference values (approximate; small differences on CPU are fine):
 
 | Model | Expected overall R² |
 |---|---|
-| `ddm3mv` | 0.99992 |
-| `ddm4mv` | similar |
+| `ddm3` | 0.99992 |
+| `ddm4` | similar |
 | `ddmcollapsesig` | 0.99969 |
 
 ### Recovery (`results/MODEL/recovery_summary.json`)
 
-The pipeline prints `[recovery_mv] PASS` on success. Check:
+The pipeline prints `[recovery] PASS` on success. Check:
 
 1. **`n_converged` / `n_attempted`** — should be close to 500/500
 2. **`coverages_95ci`** — every parameter must fall strictly in **(0.90, 0.99)**
@@ -189,7 +189,7 @@ The pipeline prints `[recovery_mv] PASS` on success. Check:
 Reference recovery results (from the reference machine; yours should be
 comparable, not identical):
 
-**ddm3mv**
+**ddm3**
 
 | Parameter | Correlation | Coverage |
 |---|---|---|
@@ -197,7 +197,7 @@ comparable, not identical):
 | a | 0.995 | 0.944 |
 | t0 | 0.977 | 0.938 |
 
-**ddm4mv**
+**ddm4**
 
 | Parameter | Correlation | Coverage |
 |---|---|---|
@@ -261,4 +261,4 @@ Only if I ask for it:
 ASL_CONFIG=configs/recovery_highn.toml make -C scripts/MODEL confirm-recovery
 ```
 
-This runs 50 subjects x 10,000 trials (supported for `ddm3mv` and `ddm4mv`).
+This runs 50 subjects x 10,000 trials (supported for `ddm3` and `ddm4`).

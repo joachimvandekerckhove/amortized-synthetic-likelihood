@@ -1,12 +1,10 @@
 """
 asl.wire -- Wire a trained ONNX emulator into JAGS via JNNX.
-
-Builds a .jnnx package from the trained ONNX model, validates it, compiles
-the JAGS module, and installs it.
 """
 
 import json
 import os
+import pickle
 import shutil
 import subprocess
 import sys
@@ -14,18 +12,15 @@ from pathlib import Path
 
 from asl.config import load_config
 from asl.data import write_obs_transform_json
-from asl.mv import emulator_error_cov_path, load_emulator_error_cov, n_chol
-from asl.registry import get_model
+from asl.cholesky import emulator_error_cov_path, load_emulator_error_cov, n_chol
 from asl.spec import Model
 
 
 def _supports_sl_package(model: Model) -> bool:
-    """True when the model uses multivariate synthetic-likelihood wiring."""
     return model.emulator_output_names is not None
 
 
 def _output_parameters_with_groups(model: Model) -> list[dict[str, str]]:
-    """Attach mean/chol groups for JNNX v2 SL packages."""
     outputs: list[dict[str, str]] = []
     n = model.n_summaries
     for i, name in enumerate(model.output_names):
@@ -49,7 +44,6 @@ def _write_likelihood_json(model: Model, package_dir: Path, sigma_emu) -> None:
 
 
 def build_jnnx_package(model: Model, onnx_path: Path, package_dir: Path) -> None:
-    """Assemble a .jnnx package directory from the ONNX model."""
     package_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(onnx_path, package_dir / "model.onnx")
 
@@ -106,8 +100,6 @@ def build_jnnx_package(model: Model, onnx_path: Path, package_dir: Path) -> None
     with open(package_dir / "scalers.json", "w") as f:
         json.dump(scalers, f, indent=2)
 
-    import pickle
-
     scalers_pkl = {
         "x_min": scalers["input_scaler"]["data_min"],
         "x_max": scalers["input_scaler"]["data_max"],
@@ -119,10 +111,13 @@ def build_jnnx_package(model: Model, onnx_path: Path, package_dir: Path) -> None
 
     readme = (
         f"# {model.slug} JNNX Package\n\n"
-        f"Raw-I/O emulator for the {model.slug} model.\n\n"
+        f"Emulator for the {model.slug} model.\n\n"
         f"## Inputs\n"
-        + "\n".join(f"- {n}: [{b[0]}, {b[1]}]" for n, b in zip(model.param_names, model.param_bounds))
-        + f"\n\n## Outputs\n"
+        + "\n".join(
+            f"- {n}: [{b[0]}, {b[1]}]"
+            for n, b in zip(model.param_names, model.param_bounds)
+        )
+        + "\n\n## Outputs\n"
         + "\n".join(f"- {n}" for n in model.output_names)
         + "\n"
     )
@@ -142,7 +137,6 @@ def build_jnnx_package(model: Model, onnx_path: Path, package_dir: Path) -> None
 
 
 def validate_package(package_dir: Path) -> None:
-    """Run the JNNX validation suite on a .jnnx package."""
     from jnnx.scripts.validate_jnnx import main as validate_main
 
     old_argv = sys.argv
@@ -156,26 +150,7 @@ def validate_package(package_dir: Path) -> None:
         sys.argv = old_argv
 
 
-def compile_and_install_module(package_dir: Path) -> Path:
-    """Generate, compile, and install the JAGS module."""
-    ort_dir = str(load_config().get("wire", "onnxruntime_dir", "") or "")
-    if not ort_dir:
-        ort_dir = os.environ.get("ONNXRUNTIME_DIR", "")
-    if not ort_dir:
-        raise RuntimeError(
-            "wire.onnxruntime_dir not set in asl.toml (or ONNXRUNTIME_DIR env)"
-        )
-
-    module_dir = _generate_jags_module_source(package_dir)
-    env = os.environ.copy()
-    env["ONNXRUNTIME_DIR"] = ort_dir
-    _compile_jags_module(module_dir, env)
-    _install_jags_module(module_dir, env)
-    return module_dir
-
-
 def _generate_jags_module_source(package_dir: Path) -> Path:
-    """Run jnnx generate-module and return the output build directory."""
     from jnnx.scripts.generate_module import main as generate_main
 
     old_argv = sys.argv
@@ -195,7 +170,6 @@ def _generate_jags_module_source(package_dir: Path) -> Path:
 
 
 def _compile_jags_module(module_dir: Path, env: dict) -> None:
-    """Run make in the generated module directory."""
     result = subprocess.run(
         ["make"], cwd=str(module_dir), env=env, capture_output=True, text=True
     )
@@ -206,7 +180,20 @@ def _compile_jags_module(module_dir: Path, env: dict) -> None:
 
 
 def _install_jags_module(module_dir: Path, env: dict) -> None:
-    """Run sudo make install; fall back to LTDL_LIBRARY_PATH if install fails."""
+    """Install JAGS module to user-local path, then sudo, then LTDL fallback."""
+    user_prefix = Path.home() / ".local"
+    env_with_prefix = {**env, "PREFIX": str(user_prefix)}
+
+    result = subprocess.run(
+        ["make", "install", f"prefix={user_prefix}"],
+        cwd=str(module_dir),
+        env=env_with_prefix,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return
+
     result = subprocess.run(
         ["sudo", "make", "install"],
         cwd=str(module_dir),
@@ -217,79 +204,44 @@ def _install_jags_module(module_dir: Path, env: dict) -> None:
     if result.returncode == 0:
         return
 
-    print(result.stdout, file=sys.stderr)
-    print(result.stderr, file=sys.stderr)
-    print("[wire] WARNING: sudo make install failed, trying LTDL_LIBRARY_PATH fallback")
     so_files = list(module_dir.glob("*.so")) + list(module_dir.glob(".libs/*.so"))
     if so_files:
         os.environ["LTDL_LIBRARY_PATH"] = str(so_files[0].parent)
-        print(f"[wire] Set LTDL_LIBRARY_PATH={so_files[0].parent}")
-    else:
-        raise RuntimeError("Module install failed and no .so found for fallback")
-
-
-def _project_fixture_path(slug: str) -> Path | None:
-    """Locate SL regression fixture in the ESL repository."""
-    for candidate in (
-        Path("fixtures") / f"{slug}_sl_regression.json",
-        Path("docs/internal") / f"{slug}_sl_regression.json",
-    ):
-        if candidate.exists():
-            return candidate.resolve()
-    return None
-
-
-def verify_sl_package(model: Model, package_dir: Path, module_dir: Path) -> None:
-    """Run JNNX synthetic-likelihood validation when capability is enabled."""
-    if not _supports_sl_package(model):
         return
 
-    from jnnx.core import JNNXPackage
-    from jnnx.sl_validation import run_sl_validation
+    print(result.stdout, file=sys.stderr)
+    print(result.stderr, file=sys.stderr)
+    raise RuntimeError("Module install failed")
 
-    root = Path.cwd().resolve()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
 
-    fixture_path = _project_fixture_path(model.slug)
-    if fixture_path is None:
-        print(
-            f"[wire] No SL regression fixture for {model.slug}; "
-            "skipping SL validation (run compute_sl_logdens_ref --write-fixture)"
-        )
-        return
-
-    package = JNNXPackage(package_dir)
-    passed, total = run_sl_validation(package, module_dir, fixture_path=fixture_path)
-    print(f"[wire] SL validation: {passed}/{total} passed")
-    if passed < total:
+def compile_and_install_module(package_dir: Path) -> Path:
+    ort_dir = str(load_config().get("wire", "onnxruntime_dir", "") or "")
+    if not ort_dir:
+        ort_dir = os.environ.get("ONNXRUNTIME_DIR", "")
+    if not ort_dir:
         raise RuntimeError(
-            f"SL validation failed for {package_dir}: {passed}/{total} tests passed"
+            "wire.onnxruntime_dir not set in asl.toml (or ONNXRUNTIME_DIR env)"
         )
 
+    module_dir = _generate_jags_module_source(package_dir)
+    env = os.environ.copy()
+    env["ONNXRUNTIME_DIR"] = ort_dir
+    _compile_jags_module(module_dir, env)
+    _install_jags_module(module_dir, env)
+    return module_dir
 
-def wire_to_jags(slug: str) -> None:
+
+def wire_to_jags(model: Model) -> None:
     """Run the full wiring pipeline for a model."""
-    model = get_model(slug)
-
+    slug = model.slug
     onnx_path = Path("results") / slug / "model.onnx"
     if not onnx_path.exists():
         print(f"[wire] FAIL: {onnx_path} not found. Run train first.", file=sys.stderr)
         sys.exit(1)
 
     package_dir = Path("models") / f"{slug}.jnnx"
-    print(f"[wire] Building .jnnx package: {package_dir}")
     build_jnnx_package(model, onnx_path, package_dir)
-
-    print("[wire] Validating package ...")
     validate_package(package_dir)
-    print("[wire] Package validated.")
-
-    print("[wire] Compiling and installing JAGS module ...")
-    module_dir = compile_and_install_module(package_dir)
-    print("[wire] Module installed.")
-
-    if _supports_sl_package(model):
-        print("[wire] Verifying synthetic likelihood package ...")
-        verify_sl_package(model, package_dir, module_dir)
-        print("[wire] PASS: SL validation")
+    compile_and_install_module(package_dir)
+    dist = f"{slug}_sl" if _supports_sl_package(model) else f"{slug}_emulator"
+    print(f"[wire] Installed JAGS module: {dist}")

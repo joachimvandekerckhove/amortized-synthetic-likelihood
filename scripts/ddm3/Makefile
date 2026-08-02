@@ -1,8 +1,8 @@
-MODEL := ddm4mv
+MODEL := ddm3
 ROOT := $(shell cd ../.. && pwd)
 PY := $(ROOT)/.venv/bin/python
 RUN := $(ROOT)/scripts/$(MODEL)/run.py
-ENV := cd $(ROOT) && unset CUDA_VISIBLE_DEVICES &&
+ENV := cd $(ROOT) &&
 
 DATA        := $(ROOT)/data/$(MODEL)/cov_train.csv
 TRANSFORM   := $(ROOT)/results/$(MODEL)/target_transform.pkl
@@ -26,7 +26,7 @@ $(JNNX): $(ONNX) $(TRANSFORM)
 $(RECOVERY): $(JNNX)
 	$(ENV) $(PY) $(RUN) confirm-recovery
 
-.PHONY: generate-data train-emulator wire-to-jags confirm-recovery confirm-recovery-highn clean
+.PHONY: generate-data train-emulator wire-to-jags confirm-recovery confirm-recovery-highn clean clean-generated
 
 generate-data: $(DATA)
 train-emulator: $(ONNX)
@@ -36,7 +36,15 @@ confirm-recovery: $(RECOVERY)
 confirm-recovery-highn:
 	$(ENV) ASL_CONFIG=$(ROOT)/configs/recovery_highn.toml $(PY) $(RUN) confirm-recovery
 
-clean:
+clean-generated:
 	rm -rf $(ROOT)/results/$(MODEL) \
 	       $(ROOT)/models/$(MODEL).jnnx $(ROOT)/figures/$(MODEL) \
+	       $(ROOT)/tmp/$(MODEL).jnnx_build
+
+clean:
+	@echo "WARNING: This will delete ALL generated AND committed data for $(MODEL)."
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = y ] || exit 1
+	rm -rf $(ROOT)/results/$(MODEL) \
+	       $(ROOT)/models/$(MODEL).jnnx $(ROOT)/figures/$(MODEL) \
+	       $(ROOT)/tmp/$(MODEL).jnnx_build \
 	       $(ROOT)/data/$(MODEL)

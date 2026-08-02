@@ -29,7 +29,7 @@ class TestModel:
 
     def test_output_names_from_emulator(self, toy_model):
         model = Model(
-            slug="mv",
+            slug="emu",
             param_names=("v",),
             param_bounds=((-1.0, 1.0),),
             summary_names=("acc",),
@@ -39,12 +39,12 @@ class TestModel:
         assert model.output_names == ("mu_acc", "chol_1")
         assert model.n_outputs == 2
 
-    def test_supports_mv_recovery_false_without_hooks(self, toy_model):
-        assert not toy_model.supports_mv_recovery()
+    def test_supports_recovery_false_without_hooks(self, toy_model):
+        assert not toy_model.supports_recovery()
 
-    def test_supports_mv_recovery(self):
+    def test_supports_recovery(self):
         model = Model(
-            slug="mv",
+            slug="emu",
             param_names=("v",),
             param_bounds=((-1.0, 1.0),),
             summary_names=("acc",),
@@ -52,4 +52,4 @@ class TestModel:
             emulator_output_names=("mu_acc", "chol_1"),
             build_jags_likelihood=lambda obs: ["line"],
         )
-        assert model.supports_mv_recovery()
+        assert model.supports_recovery()

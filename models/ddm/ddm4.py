@@ -3,21 +3,35 @@ models.ddm.ddm4 -- Four-parameter drift diffusion model.
 
 Parameters: drift rate (v), boundary separation (a), nondecision time (t0),
 starting-point bias (w).
-Summaries: rt_mean_corr, rt_var_corr, rt_mean_err, rt_var_err, err_rate.
-
-Parameter ranges match the reference implementation to ensure numerically
-well-behaved recovery.
+Summaries: rt_mean/var (correct and error), error rate.
 """
 
 import numpy as np
 
+from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
 from models.ddm.simulator import simulate_ddm_paths_biased
 
+PARAM_NAMES = ("v", "a", "t0", "w")
+PARAM_BOUNDS = ((-2.0, 2.0), (0.5, 2.0), (0.15, 0.45), (0.15, 0.85))
+SUMMARY_NAMES = (
+    "rt_mean_corr",
+    "rt_var_corr",
+    "rt_mean_err",
+    "rt_var_err",
+    "err_rate",
+)
+N_SUMMARIES = len(SUMMARY_NAMES)
 
-def simulate_summaries_ddm4(
-    params: np.ndarray, n_trials: int, seed: int
-) -> np.ndarray:
+RECOVERY_PRIORS = {
+    "v": "v ~ dnorm(0, 0.25)",
+    "a": "a ~ dunif(0.25, 3.0)",
+    "t0": "t0 ~ dunif(0.1, 0.6)",
+    "w": "w ~ dbeta(2, 2)",
+}
+
+
+def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
     """Simulate summary statistics for the 4-parameter DDM."""
     v, a, t0, w = (
         float(params[0]),
@@ -51,16 +65,20 @@ def simulate_summaries_ddm4(
     return np.array([rt_mean_corr, rt_var_corr, rt_mean_err, rt_var_err, err_rate])
 
 
+def build_jags_likelihood(obs: dict) -> list[str]:
+    del obs
+    return build_sl_likelihood_line("ddm4", PARAM_NAMES, N_SUMMARIES)
+
+
 DDM4 = Model(
     slug="ddm4",
-    param_names=("v", "a", "t0", "w"),
-    param_bounds=((-2.0, 2.0), (0.5, 2.0), (0.15, 0.45), (0.15, 0.85)),
-    summary_names=("rt_mean_corr", "rt_var_corr", "rt_mean_err", "rt_var_err", "err_rate"),
-    simulate_summaries=simulate_summaries_ddm4,
-    recovery_priors={
-        "v": "v ~ dnorm(0, 0.25)",
-        "a": "a ~ dunif(0.25, 3.0)",
-        "t0": "t0 ~ dunif(0.1, 0.6)",
-        "w": "w ~ dbeta(2, 2)",
-    },
+    param_names=PARAM_NAMES,
+    param_bounds=PARAM_BOUNDS,
+    summary_names=SUMMARY_NAMES,
+    emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
+    simulate_summaries=simulate_summaries,
+    recovery_priors=RECOVERY_PRIORS,
+    build_jags_likelihood=build_jags_likelihood,
+    default_architecture="DeepWide_32x6",
+    default_n_epochs=10000,
 )

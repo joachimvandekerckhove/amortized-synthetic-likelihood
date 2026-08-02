@@ -1,4 +1,4 @@
-"""Multivariate emulator training (dual-head, covariance-aware)."""
+"""Emulator training (dual-head, covariance-aware)."""
 
 import json
 import sys
@@ -13,13 +13,9 @@ from sklearn.preprocessing import StandardScaler
 from asl.config import load_config
 from asl.cov_data import load_cov_dataset, load_cov_settings
 from asl.data import TargetTransform, save_target_transform, summary_column_masks
-from asl.export_mv import export_mv_onnx
-from asl.mlp import (
-    DEVICE,
-    build_architecture,
-    resolve_training_settings,
-)
-from asl.mv import (
+from asl.export import export_onnx
+from asl.mlp import DEVICE, build_architecture, resolve_training_settings
+from asl.cholesky import (
     cov_stein_loss,
     debias_emulator_error_cov,
     n_chol,
@@ -27,7 +23,7 @@ from asl.mv import (
     std_cov_from_logcov,
     unpack_upper_tri,
 )
-from asl.registry import get_model
+from asl.spec import Model
 
 COV_LAMBDA = 1.0
 
@@ -48,12 +44,10 @@ class DualHeadNet(nn.Module):
         return self.mean_head(features), self.chol_head(features)
 
     def count_trainable_parameters(self) -> int:
-        """Count trainable parameters in this network."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
 def build_target_transform(rt_mask: np.ndarray, z_mean: np.ndarray) -> TargetTransform:
-    """Fit a TargetTransform scaler on log1p-space summary means."""
     target_transform = TargetTransform(rt_mask)
     target_transform.scaler.fit(z_mean)
     return target_transform
@@ -62,7 +56,6 @@ def build_target_transform(rt_mask: np.ndarray, z_mean: np.ndarray) -> TargetTra
 def build_C1_std_array(
     C1_z: np.ndarray, scale: np.ndarray, n_summaries: int
 ) -> np.ndarray:
-    """Convert packed per-trial covariances to standardized space."""
     rows = []
     for flat in C1_z:
         C1_log = unpack_upper_tri(flat, n_summaries)
@@ -70,7 +63,7 @@ def build_C1_std_array(
     return np.stack(rows, axis=0).astype(np.float32)
 
 
-def train_one_epoch_mv(
+def train_one_epoch(
     model: DualHeadNet,
     optimizer: torch.optim.Optimizer,
     X_tensor: torch.Tensor,
@@ -80,7 +73,6 @@ def train_one_epoch_mv(
     batch_size: int,
     cov_lambda: float = COV_LAMBDA,
 ) -> None:
-    """Train one epoch with mean MSE plus Stein covariance loss."""
     model.train()
     n = X_tensor.shape[0]
     indices = torch.randperm(n, device=DEVICE)
@@ -107,7 +99,6 @@ def evaluate_mean_r2(
     y_raw: np.ndarray,
     target_transform: TargetTransform,
 ) -> tuple[float, np.ndarray]:
-    """Evaluate mean-head R^2 in raw physical units."""
     model.eval()
     with torch.no_grad():
         mu_std, _ = model(X_tensor)
@@ -126,7 +117,6 @@ def evaluate_cov_stein(
     C1_tensor: torch.Tensor,
     n_summaries: int,
 ) -> float:
-    """Evaluate mean Stein covariance loss on a dataset."""
     model.eval()
     with torch.no_grad():
         _, chol_raw = model(X_tensor)
@@ -141,7 +131,6 @@ def compute_emulator_error_cov(
     n_rep: int,
     n_replicates: int,
 ) -> np.ndarray:
-    """Debiased covariance of mean-head residuals in standardized summary space."""
     net.eval()
     with torch.no_grad():
         mu_pred, _ = net(X_tensor)
@@ -164,7 +153,6 @@ def retrain_dual_head_model(
     lr: float,
     cov_lambda: float = COV_LAMBDA,
 ) -> tuple[DualHeadNet, StandardScaler, TargetTransform]:
-    """Retrain the selected architecture as a dual-head covariance-aware model."""
     x_scaler = StandardScaler()
     X_s = x_scaler.fit_transform(X).astype(np.float32)
 
@@ -182,7 +170,7 @@ def retrain_dual_head_model(
 
     t_train = time.monotonic()
     for epoch in range(n_epochs):
-        train_one_epoch_mv(
+        train_one_epoch(
             net,
             optimizer,
             X_tensor,
@@ -195,38 +183,36 @@ def retrain_dual_head_model(
         scheduler.step()
         if (epoch + 1) % 50 == 0:
             elapsed = time.monotonic() - t_train
-            print(f"[train_mv]   epoch {epoch + 1}/{n_epochs} ({elapsed:.0f}s)")
+            print(f"[train]   epoch {epoch + 1}/{n_epochs} ({elapsed:.0f}s)")
 
     net.eval()
     return net, x_scaler, target_transform
 
 
-def train_emulator_mv(slug: str) -> None:
+def train_emulator(model: Model) -> None:
     """Train a fixed-architecture dual-head emulator and export ONNX."""
     config = load_config()
-    model = get_model(slug)
+    slug = model.slug
     settings = resolve_training_settings()
-    if model.default_n_epochs is not None and not config.has("training", "training_epochs"):
+    if model.default_n_epochs is not None:
         settings = {**settings, "n_epochs": model.default_n_epochs}
     rt_mask, _ = summary_column_masks(model)
-    cov_lambda = float(
-        config.get("training", "covariance_loss_weight", COV_LAMBDA)
-    )
+    cov_lambda = float(config.get("training", "covariance_loss_weight", COV_LAMBDA))
 
     arch_name = config.get("training", "architecture") or model.default_architecture
     if not arch_name:
-        print("[train_mv] FAIL: No architecture specified.", file=sys.stderr)
+        print("[train] FAIL: No architecture specified.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[train_mv] Model: {slug}")
-    print(f"[train_mv] Device: {DEVICE}")
-    print(f"[train_mv] Architecture: {arch_name}")
-    print(f"[train_mv] Settings: {settings}")
-    print(f"[train_mv] Covariance loss weight: {cov_lambda}")
+    print(f"[train] Model: {slug}")
+    print(f"[train] Device: {DEVICE}")
+    print(f"[train] Architecture: {arch_name}")
+    print(f"[train] Settings: {settings}")
+    print(f"[train] Covariance loss weight: {cov_lambda}")
 
-    X, z_mean, C1_z, y_raw, _ = load_cov_dataset(slug, subsample=settings["subsample"])
+    X, z_mean, C1_z, y_raw, _ = load_cov_dataset(model)
     print(
-        f"[train_mv] Loaded {X.shape[0]} rows, {X.shape[1]} params, "
+        f"[train] Loaded {X.shape[0]} rows, {X.shape[1]} params, "
         f"{z_mean.shape[1]} summaries"
     )
 
@@ -237,7 +223,7 @@ def train_emulator_mv(slug: str) -> None:
     target_transform = build_target_transform(rt_mask, z_mean)
     C1_std = build_C1_std_array(C1_z, target_transform.scaler.scale_, model.n_summaries)
 
-    print("[train_mv] Training dual-head model ...")
+    print("[train] Training dual-head model ...")
     final_net, x_scaler, target_transform = retrain_dual_head_model(
         build_fn=build_fn,
         X=X,
@@ -258,9 +244,7 @@ def train_emulator_mv(slug: str) -> None:
     overall_r2, per_target_r2 = evaluate_mean_r2(
         final_net, X_tensor, y_raw, target_transform
     )
-    cov_stein = evaluate_cov_stein(
-        final_net, X_tensor, C1_tensor, model.n_summaries
-    )
+    cov_stein = evaluate_cov_stein(final_net, X_tensor, C1_tensor, model.n_summaries)
     mu_std_targets = target_transform.scaler.transform(z_mean).astype(np.float64)
     n_rep, n_replicates = load_cov_settings(slug)
     mean_C1_std = np.mean(C1_std, axis=0)
@@ -272,15 +256,13 @@ def train_emulator_mv(slug: str) -> None:
         n_rep,
         n_replicates,
     )
-    save_emulator_error_cov(
-        slug, sigma_emu, n_rep=n_rep, n_replicates=n_replicates
-    )
-    print(f"[train_mv] Emulator error cov diag: {np.diag(sigma_emu).tolist()}")
+    save_emulator_error_cov(slug, sigma_emu, n_rep=n_rep, n_replicates=n_replicates)
+    print(f"[train] Emulator error cov diag: {np.diag(sigma_emu).tolist()}")
     print(
-        f"[train_mv] Final mean-head R^2: overall={overall_r2:.6f}, "
+        f"[train] Final mean-head R^2: overall={overall_r2:.6f}, "
         f"per_target={per_target_r2.tolist()}"
     )
-    print(f"[train_mv] Final Stein cov loss: {cov_stein:.6f}")
+    print(f"[train] Final Stein cov loss: {cov_stein:.6f}")
 
     summary = {
         "architecture": arch_name,
@@ -296,15 +278,15 @@ def train_emulator_mv(slug: str) -> None:
         json.dump(summary, f, indent=2)
 
     onnx_path = results_dir / "model.onnx"
-    export_mv_onnx(final_net, x_scaler, target_transform, model, onnx_path)
+    export_onnx(final_net, x_scaler, target_transform, model, onnx_path)
     save_target_transform(slug, target_transform)
-    print(f"[train_mv] Exported ONNX: {onnx_path}")
+    print(f"[train] Exported ONNX: {onnx_path}")
 
-    threshold = float(config.get("training", "mean_r2_threshold"))
+    threshold = float(config.get("training", "mean_r2_threshold", 0.999))
     if overall_r2 < threshold:
         print(
-            f"[train_mv] FAIL: Overall mean-head R^2 = {overall_r2:.6f} < {threshold}",
+            f"[train] FAIL: Overall mean-head R^2 = {overall_r2:.6f} < {threshold}",
             file=sys.stderr,
         )
         sys.exit(1)
-    print(f"[train_mv] PASS: mean-head R^2 = {overall_r2:.6f} >= {threshold}")
+    print(f"[train] PASS: mean-head R^2 = {overall_r2:.6f} >= {threshold}")

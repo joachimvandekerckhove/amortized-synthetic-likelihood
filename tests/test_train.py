@@ -1,4 +1,4 @@
-"""Unit tests for asl.train_mv helper functions."""
+"""Unit tests for asl.train helper functions."""
 
 from __future__ import annotations
 
@@ -6,9 +6,10 @@ import numpy as np
 import pytest
 import torch
 
+from asl.cholesky import pack_upper_tri
 from asl.data import summary_column_masks
 from asl.mlp import build_architecture
-from asl.train_mv import (
+from asl.train import (
     DualHeadNet,
     build_C1_std_array,
     build_target_transform,
@@ -41,8 +42,6 @@ class TestBuildHelpers:
 
     def test_build_C1_std_array(self, toy_model):
         n = toy_model.n_summaries
-        from asl.mv import pack_upper_tri
-
         C1_z = np.stack(
             [pack_upper_tri(np.eye(n) * (i + 1)) for i in range(5)],
             axis=0,
