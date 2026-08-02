@@ -13,7 +13,7 @@ recovery step reports `PASS` with all parameter coverages in **(0.90, 0.99)**.
 ## Required reading (in order)
 
 1. `README.md` in the repository root — full reproduction guide
-2. `asl.toml` — user configuration file you must edit
+2. `asl.toml` — optional user overrides (see Configuration)
 3. `scripts/MODEL/Makefile` — exact make targets for this model
 4. Do **not** edit `src/asl/presets/full.toml`
 
@@ -37,7 +37,7 @@ Install before starting:
 | `make` | orchestrates the four stages |
 | JAGS 4.x | Bayesian recovery via `py2jags` |
 | `g++` | compiles the JNNX JAGS module |
-| ONNX Runtime (pre-built) | links the JAGS module to the ONNX emulator |
+| ONNX Runtime C/C++ SDK | links the JAGS module to the ONNX emulator (auto-downloaded; see Configuration) |
 
 On Debian/Ubuntu:
 
@@ -45,14 +45,21 @@ On Debian/Ubuntu:
 sudo apt install jags g++ make
 ```
 
-Download ONNX Runtime (example for Linux x86-64):
+The ONNX Runtime SDK is downloaded automatically into `vendor/` on the first
+`wire-to-jags` step. To prefetch:
 
 ```bash
-wget https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-linux-x64-1.18.0.tgz
-tar xf onnxruntime-linux-x64-1.18.0.tgz
+make bootstrap-ort
 ```
 
-Note the extracted directory path; you will need it below.
+Manual download (only if auto-download is unavailable on your platform):
+
+```bash
+wget https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/onnxruntime-linux-x64-1.23.2.tgz
+tar xf onnxruntime-linux-x64-1.23.2.tgz
+```
+
+Set `wire.onnxruntime_dir` in `asl.toml` to the extracted directory if needed.
 
 ## Python environment
 
@@ -60,14 +67,14 @@ Note the extracted directory path; you will need it below.
 python -m venv .venv
 source .venv/bin/activate
 
-# If a GPU is available, obtain a suitable version of torch
-# For older GPUs (Pascal / sm_61, e.g. GTX 1080 Ti), use this exact wheel:
-pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
-
-# CPU-only alternative:
-# pip install torch
-
 pip install -e ".[jags,dev]"
+```
+
+For GPU training on Pascal / sm_61 GPUs (e.g. GTX 1080 Ti), reinstall PyTorch
+with CUDA after the editable install:
+
+```bash
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
 ```
 
 Verify:
@@ -78,6 +85,52 @@ pytest
 ```
 
 All tests must pass before running the pipeline.
+
+## Tested platform
+
+The paper-scale pipeline was validated on the following stack. Other machines
+may differ in wall time and small numerical details; gates and pass/fail
+criteria are the same.
+
+### Hardware
+
+| Component | Specification |
+|---|---|
+| CPU | 32 logical cores |
+| GPU | 2× NVIDIA GeForce GTX 1080 Ti (Pascal, sm_61) |
+
+### Software
+
+| Component | Version / notes |
+|---|---|
+| OS | Linux (Oracle Cloud VM, Ubuntu-based) |
+| Python | 3.11 |
+| PyTorch | 2.6.0+cu126 (CUDA 12.6 wheel) |
+| JAGS | 4.x (`jags` system package) |
+| g++ | system package |
+| ONNX Runtime SDK | 1.23.2 (auto-downloaded to `vendor/`) |
+| Package install | `pip install -e ".[jags,dev]"` |
+
+### Verification commands
+
+| Command | Result on tested platform |
+|---|---|
+| `pytest` | 77 tests passed |
+| `make all` | all four models: train + wire + recovery **PASS** |
+
+### Observed wall time (`make all`)
+
+Recovery dominated total runtime. On the hardware above:
+
+| Model | Recovery (approx.) |
+|---|---|
+| `ddm3` | 30 minutes |
+| `ddm4` | 1 hour |
+| `ddmcollapsesig` | 2 hours |
+| `dw` | 35 minutes |
+| **Total** | about 5 hours |
+
+Report your own OS, Python, and GPU when filing issues or reproduction reports.
 
 ## Configuration
 
@@ -171,6 +224,7 @@ Reference values (approximate; small differences on CPU are fine):
 | `ddm3` | 0.99992 |
 | `ddm4` | similar |
 | `ddmcollapsesig` | 0.99969 |
+| `dw` | 0.99928 |
 
 ### Recovery (`results/MODEL/recovery_summary.json`)
 
@@ -210,6 +264,13 @@ comparable, not identical):
 | v | 0.990 | 0.940 |
 | k | 0.958 | 0.940 |
 | t0 | 0.994 | 0.962 |
+
+**dw**
+
+| Parameter | Correlation | Coverage |
+|---|---|---|
+| logit_epsilon | 0.976 | 0.940 |
+| logit_mu | 0.967 | 0.936 |
 
 ### Diagnostic plot
 
