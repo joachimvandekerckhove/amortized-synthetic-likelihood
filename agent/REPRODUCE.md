@@ -133,11 +133,11 @@ Recovery dominated total runtime. On the hardware above:
 
 Report your own OS, Python, and GPU when filing issues or reproduction reports.
 
-### Clean-environment check (Turing, Docker)
+### Clean-environment check (Docker)
 
-Independent validation on **turing.ss.uci.edu** (16 cores, 62 GiB RAM, Ubuntu 22.04 host,
-Docker 29.6.1). Container image: `python:3.11-slim-bookworm` (Debian 12). Fresh
-`docker run --rm` after `git clone` from `origin/main` (commit `16109b6`).
+Independent validation in a fresh `docker run --rm` container after `git clone`
+from `origin/main` (commit `16109b6`). Host: Ubuntu 22.04 with Docker 29.x.
+Container image: `python:3.11-slim-bookworm` (Debian 12).
 
 | Stage | Result | Notes |
 |---|---|---|
