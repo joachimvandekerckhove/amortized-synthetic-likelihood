@@ -1,7 +1,7 @@
 ROOT := $(shell pwd)
 PY := $(ROOT)/.venv/bin/python
 
-.PHONY: all bootstrap-ort ddm3 ddm4 ddmcollapsesig dw test
+.PHONY: all bootstrap-ort ddm3 ddm4 ddmcollapsesig dw vpw08 test
 
 bootstrap-ort:
 	$(PY) scripts/bootstrap_onnxruntime.py
@@ -19,6 +19,9 @@ ddmcollapsesig:
 
 dw:
 	$(MAKE) -C scripts/dw all
+
+vpw08: ddm3 ddm4 ddmcollapsesig
+	$(MAKE) -C scripts/vpw08 all
 
 test:
 	$(PY) -m pytest
