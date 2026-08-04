@@ -64,10 +64,11 @@ def toy_model() -> Model:
         slug="toy",
         param_names=("v", "a"),
         param_bounds=((-1.0, 1.0), (0.5, 2.0)),
+        prior_bounds=((-0.8, 0.8), (0.6, 1.8)),
         summary_names=("acc", "rt_mean", "rt_var"),
+        summary_transforms=("identity", "log1p", "log1p"),
         simulate_summaries=simulate,
         recovery_priors={"v": "v ~ dunif(-1, 1)", "a": "a ~ dunif(0.5, 2)"},
         default_architecture="DeepWide_24x4",
-        default_n_epochs=100,
     )
     return model

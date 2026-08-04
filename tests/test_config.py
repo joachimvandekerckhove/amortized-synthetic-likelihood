@@ -10,7 +10,7 @@ class TestConfig:
         monkeypatch.chdir(repo_root)
         reset_config()
         config = load_config()
-        assert config.get("training", "training_epochs") == 10000
+        assert config.get("training", "training_epochs") == 25000
 
     def test_explicit_override(self, config_file):
         config_file("[training]\ntraining_epochs = 42\n")

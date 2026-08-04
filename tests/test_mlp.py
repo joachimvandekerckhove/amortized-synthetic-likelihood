@@ -40,7 +40,7 @@ class TestResolveTrainingSettings:
         config_file("")
         settings = resolve_training_settings()
         assert settings == {
-            "n_epochs": 10000,
+            "n_epochs": 25000,
             "batch_size": 4096,
             "lr": 1e-3,
         }

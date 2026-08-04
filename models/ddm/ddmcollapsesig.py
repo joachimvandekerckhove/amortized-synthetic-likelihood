@@ -14,34 +14,29 @@ import numpy as np
 
 from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
+from models.ddm.bounds import (
+    DDMCOLLAPSESIG_PRIOR_BOUNDS,
+    DDMCOLLAPSESIG_RECOVERY_PRIORS,
+    DDMCOLLAPSESIG_TRAINING_BOUNDS,
+)
 from models.ddm.simulator import SimulationConfig
 
 FIXED_BIAS = 0.5
-RT_QUANTILES = (10, 30, 50, 70, 90)
-TAIL_QUANTILES = (50, 90)
+MIN_TERTILE = 15
 
 SUMMARY_NAMES = (
     "acc",
     "rt_q10",
-    "rt_q30",
-    "rt_q50",
-    "rt_q70",
-    "rt_q90",
-    "rt_q50_corr",
-    "rt_q90_corr",
-    "rt_q50_err",
-    "rt_q90_err",
+    "var_t1",
+    "var_t3_minus_t1",
 )
 N_SUMMARIES = len(SUMMARY_NAMES)
 
 PARAM_NAMES = ("a0", "v", "k", "t0")
-PARAM_BOUNDS = ((0.5, 2.0), (-1.5, 1.5), (0.0, 8.0), (0.05, 0.45))
-RECOVERY_PRIORS = {
-    "a0": "a0 ~ dunif(0.5, 2.0)",
-    "v": "v ~ dunif(-1.5, 1.5)",
-    "k": "k ~ dunif(0, 8.0)",
-    "t0": "t0 ~ dunif(0.05, 0.45)",
-}
+PARAM_BOUNDS = DDMCOLLAPSESIG_TRAINING_BOUNDS
+PRIOR_BOUNDS = DDMCOLLAPSESIG_PRIOR_BOUNDS
+SUMMARY_TRANSFORMS = ("identity", "log1p", "log1p", "log1p")
+RECOVERY_PRIORS = DDMCOLLAPSESIG_RECOVERY_PRIORS
 
 
 def collapse_bound(times: np.ndarray | float, a0: float, k: float) -> np.ndarray:
@@ -57,6 +52,19 @@ def compute_rt_quantiles(
     if len(reaction_times) < 2:
         return np.full(len(percentiles), np.nan, dtype=np.float64)
     return np.percentile(reaction_times, percentiles).astype(np.float64)
+
+
+def tertile_partition(rt: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Split RTs into lower / middle / upper tertiles."""
+    if len(rt) < 3 * MIN_TERTILE:
+        return np.array([]), np.array([]), np.array([])
+    q1, q2 = np.percentile(rt, [100 / 3, 200 / 3])
+    low = rt[rt <= q1]
+    mid = rt[(rt > q1) & (rt <= q2)]
+    high = rt[rt > q2]
+    if min(len(low), len(mid), len(high)) < MIN_TERTILE:
+        return np.array([]), np.array([]), np.array([])
+    return low, mid, high
 
 
 def simulate_paths(
@@ -109,21 +117,20 @@ def simulate_paths(
 
 
 def summaries_from_paths(reaction_times: np.ndarray, choices: np.ndarray) -> np.ndarray:
-    """Compute accuracy and RT quantile summaries."""
+    """Compute accuracy, lower-tail RT, and tertile variance summaries."""
     if len(reaction_times) < 2:
         return np.full(N_SUMMARIES, np.nan)
 
-    rts_corr = reaction_times[choices == 1]
-    rts_err = reaction_times[choices == 0]
-    if len(rts_corr) < 2 or len(rts_err) < 2:
+    acc = float(np.mean(choices == 1))
+    rt_q10 = float(compute_rt_quantiles(reaction_times, (10,))[0])
+
+    low, _, high = tertile_partition(reaction_times.astype(np.float64))
+    if low.size == 0:
         return np.full(N_SUMMARIES, np.nan)
 
-    overall_q = compute_rt_quantiles(reaction_times, RT_QUANTILES)
-    corr_q = compute_rt_quantiles(rts_corr, TAIL_QUANTILES)
-    err_q = compute_rt_quantiles(rts_err, TAIL_QUANTILES)
-    return np.concatenate(
-        [[float(np.mean(choices == 1))], overall_q, corr_q, err_q]
-    ).astype(np.float64)
+    var_t1 = float(np.var(low, ddof=1))
+    var_t3 = float(np.var(high, ddof=1))
+    return np.array([acc, rt_q10, var_t1, var_t3 - var_t1], dtype=np.float64)
 
 
 def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
@@ -142,11 +149,12 @@ DDMCOLLAPSESIG = Model(
     slug="ddmcollapsesig",
     param_names=PARAM_NAMES,
     param_bounds=PARAM_BOUNDS,
+    prior_bounds=PRIOR_BOUNDS,
     summary_names=SUMMARY_NAMES,
+    summary_transforms=SUMMARY_TRANSFORMS,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
     default_architecture="DeepWide_32x6",
-    default_n_epochs=10000,
 )

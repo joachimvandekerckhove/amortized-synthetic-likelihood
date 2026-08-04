@@ -10,10 +10,16 @@ import numpy as np
 
 from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
+from models.ddm.bounds import (
+    DDM4_PRIOR_BOUNDS,
+    DDM4_RECOVERY_PRIORS,
+    DDM4_TRAINING_BOUNDS,
+)
 from models.ddm.simulator import simulate_ddm_paths_biased
 
 PARAM_NAMES = ("v", "a", "t0", "w")
-PARAM_BOUNDS = ((-2.0, 2.0), (0.5, 2.0), (0.15, 0.45), (0.15, 0.85))
+PARAM_BOUNDS = DDM4_TRAINING_BOUNDS
+PRIOR_BOUNDS = DDM4_PRIOR_BOUNDS
 SUMMARY_NAMES = (
     "rt_mean_corr",
     "rt_var_corr",
@@ -21,14 +27,10 @@ SUMMARY_NAMES = (
     "rt_var_err",
     "err_rate",
 )
+SUMMARY_TRANSFORMS = ("log1p", "log1p", "log1p", "log1p", "identity")
 N_SUMMARIES = len(SUMMARY_NAMES)
 
-RECOVERY_PRIORS = {
-    "v": "v ~ dnorm(0, 0.25)",
-    "a": "a ~ dunif(0.25, 3.0)",
-    "t0": "t0 ~ dunif(0.1, 0.6)",
-    "w": "w ~ dbeta(2, 2)",
-}
+RECOVERY_PRIORS = DDM4_RECOVERY_PRIORS
 
 
 def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
@@ -74,11 +76,12 @@ DDM4 = Model(
     slug="ddm4",
     param_names=PARAM_NAMES,
     param_bounds=PARAM_BOUNDS,
+    prior_bounds=PRIOR_BOUNDS,
     summary_names=SUMMARY_NAMES,
+    summary_transforms=SUMMARY_TRANSFORMS,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
     default_architecture="DeepWide_32x6",
-    default_n_epochs=10000,
 )

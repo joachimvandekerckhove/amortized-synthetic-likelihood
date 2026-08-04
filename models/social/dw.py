@@ -223,11 +223,11 @@ DW = Model(
     param_bounds=PARAM_BOUNDS,
     prior_bounds=PRIOR_PARAM_BOUNDS,
     summary_names=SUMMARY_NAMES,
+    summary_transforms=("identity",) * N_SUMMARIES,
     draw_cov_parameters=draw_training_logit_parameters,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
     default_architecture="DeepWide_32x6",
-    default_n_epochs=10000,
 )

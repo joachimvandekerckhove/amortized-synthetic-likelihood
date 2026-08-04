@@ -22,7 +22,9 @@ class TestModel:
             slug="scalar",
             param_names=("v",),
             param_bounds=((-1.0, 1.0),),
+            prior_bounds=((-0.5, 0.5),),
             summary_names=("acc", "rt"),
+            summary_transforms=("identity", "log1p"),
             simulate_summaries=_simulate,
         )
         assert model.output_names == ("acc", "rt")
@@ -32,7 +34,9 @@ class TestModel:
             slug="emu",
             param_names=("v",),
             param_bounds=((-1.0, 1.0),),
+            prior_bounds=((-0.5, 0.5),),
             summary_names=("acc",),
+            summary_transforms=("identity",),
             simulate_summaries=_simulate,
             emulator_output_names=("mu_acc", "chol_1"),
         )
@@ -47,7 +51,9 @@ class TestModel:
             slug="emu",
             param_names=("v",),
             param_bounds=((-1.0, 1.0),),
+            prior_bounds=((-0.5, 0.5),),
             summary_names=("acc",),
+            summary_transforms=("identity",),
             simulate_summaries=_simulate,
             emulator_output_names=("mu_acc", "chol_1"),
             build_jags_likelihood=lambda obs: ["line"],

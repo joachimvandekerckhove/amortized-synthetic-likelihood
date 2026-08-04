@@ -47,6 +47,6 @@ class TestModelSpec:
     def test_parameter_layout(self):
         assert DDMCOLLAPSESIG.param_names == PARAM_NAMES
         assert DDMCOLLAPSESIG.summary_names == SUMMARY_NAMES
-        assert DDMCOLLAPSESIG.n_outputs == 65
+        assert DDMCOLLAPSESIG.n_outputs == 14
         assert DDMCOLLAPSESIG.supports_recovery()
         assert DDMCOLLAPSESIG.slug == "ddmcollapsesig"

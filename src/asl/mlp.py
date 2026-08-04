@@ -53,7 +53,7 @@ def resolve_training_settings() -> dict:
     """Resolve training hyperparameters from TOML configuration."""
     config = load_config()
     return {
-        "n_epochs": int(config.get("training", "training_epochs", 10000)),
+        "n_epochs": int(config.get("training", "training_epochs", 25000)),
         "batch_size": int(config.get("training", "batch_size", 4096)),
         "lr": float(config.get("training", "learning_rate", 0.001)),
     }

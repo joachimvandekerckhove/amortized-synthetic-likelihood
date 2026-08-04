@@ -96,11 +96,6 @@ def resolve_recovery_settings() -> dict:
     }
 
 
-def inference_bounds(model: Model) -> tuple[tuple[float, float], ...]:
-    """Bounds for recovery subject draws and MLE warm-start."""
-    return model.prior_bounds or model.param_bounds
-
-
 def simulate_subject_observations(
     model: Model,
     params: np.ndarray,
@@ -131,7 +126,7 @@ def _compute_mle_initial_values(
     session = cpu_inference_session(onnx_path)
     n = model.n_summaries
 
-    bounds = inference_bounds(model)
+    bounds = model.prior_bounds
 
     def neg_log_lik(params: np.ndarray) -> float:
         for i, (lo, hi) in enumerate(bounds):
@@ -283,7 +278,7 @@ def run_recovery_study(model: Model) -> None:
 
     rng = np.random.default_rng(42)
     work_items = []
-    recovery_bounds = inference_bounds(model)
+    recovery_bounds = model.prior_bounds
     for subj in range(settings["n_subjects"]):
         true_params = np.empty(model.n_params)
         for i, (lo, hi) in enumerate(recovery_bounds):

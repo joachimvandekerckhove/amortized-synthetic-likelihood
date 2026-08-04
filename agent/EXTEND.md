@@ -24,10 +24,10 @@ Success means:
 Study these existing models as templates (simplest to more complex):
 
 1. `models/ddm/ddm3.py` — three summaries, three params
-2. `models/ddm/ddmcollapsesig.py` — ten summaries, four params
+2. `models/ddm/ddmcollapsesig.py` — four summaries, four params
 3. `models/social/dw.py` — non-RT summaries, custom training draws, prior bounds
 4. `src/asl/spec.py` — `Model` dataclass contract
-5. `src/asl/data.py` — how summary names map to log1p transforms
+5. `src/asl/data.py` — per-summary transforms via `Model.summary_transforms`
 6. `src/asl/cholesky.py` — `build_sl_likelihood_line`, `emulator_output_names_for`
 7. `scripts/ddm3/run.py` and `scripts/ddm3/Makefile` — pipeline wiring
 8. `tests/test_ddmcollapsesig.py` — sensitivity and model-spec tests
@@ -75,10 +75,10 @@ Rules from the existing codebase:
 
 - **Parameter bounds** must keep the simulator numerically stable (avoid
   degenerate trials where almost no paths absorb, or summaries are always NaN).
-- **Summary names** drive automatic transforms: columns whose names contain
-  `acc`, `rate`, or `prob` (and not `rt`) are treated as proportions; all
-  others receive `log1p` before standardization (`asl.data.summary_column_masks`).
-  Name RT summaries accordingly (e.g. `rt_mean`, `rt_q50`, not `mean_rt`).
+- **Training vs prior bounds**: set `param_bounds` for emulator training / cov_data
+  draws and `prior_bounds` for recovery subject draws (required on every model).
+- **Summary transforms**: set `summary_transforms` explicitly (`"identity"` or
+  `"log1p"`) — one entry per `summary_names` column.
 - **Order matters**: `param_names`, `param_bounds`, and the `params` array passed
   to `simulate_summaries` must use the same order everywhere.
 
@@ -168,19 +168,20 @@ SLUG_MODEL = Model(
     slug="SLUG",
     param_names=PARAM_NAMES,
     param_bounds=PARAM_BOUNDS,
+    prior_bounds=PRIOR_BOUNDS,
     summary_names=SUMMARY_NAMES,
+    summary_transforms=SUMMARY_TRANSFORMS,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
     default_architecture="DeepWide_32x6",   # or DeepWide_24x4
-    default_n_epochs=10000,
 )
 ```
 
 If training draws need a different distribution than uniform `param_bounds`, set
-`draw_cov_parameters` (see `models/social/dw.py`). If recovery priors use a
-narrower support than training, set `prior_bounds` as well.
+`draw_cov_parameters` (see `models/social/dw.py`). `prior_bounds` is required
+on every model.
 
 Register the model in `models/catalog.py` (`get_model` lookup).
 

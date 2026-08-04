@@ -8,7 +8,7 @@ COLLAPSE_SLUG = "ddmcollapsesig"
 
 DDM3_N_SUMM = 3
 DDM4_N_SUMM = 5
-COLLAPSE_N_SUMM = 10
+COLLAPSE_N_SUMM = 4
 
 
 def _metaregression_lines() -> list[str]:
