@@ -9,6 +9,7 @@ TRANSFORM   := $(ROOT)/results/$(MODEL)/target_transform.pkl
 ONNX        := $(ROOT)/results/$(MODEL)/model.onnx
 JNNX        := $(ROOT)/models/$(MODEL).jnnx/model.onnx
 RECOVERY    := $(ROOT)/results/$(MODEL)/recovery_summary.json
+EZ_COMPARE  := $(ROOT)/figures/$(MODEL)/ez_compare.pdf
 
 .DEFAULT_GOAL := all
 
@@ -26,7 +27,12 @@ $(JNNX): $(ONNX) $(TRANSFORM)
 $(RECOVERY): $(JNNX)
 	$(ENV) $(PY) $(RUN) confirm-recovery
 
-.PHONY: generate-data train-emulator wire-to-jags confirm-recovery confirm-recovery-highn clean clean-generated
+ez-compare: $(EZ_COMPARE)
+
+$(EZ_COMPARE): $(JNNX)
+	$(ENV) $(PY) $(ROOT)/scripts/$(MODEL)/ez_compare.py
+
+.PHONY: generate-data train-emulator wire-to-jags confirm-recovery confirm-recovery-highn ez-compare clean clean-generated
 
 generate-data: $(DATA)
 train-emulator: $(ONNX)
