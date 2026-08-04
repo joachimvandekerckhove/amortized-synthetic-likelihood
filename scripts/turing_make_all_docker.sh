@@ -23,8 +23,8 @@ apt-get install -y -qq build-essential jags pkg-config make g++ procps git
 python3 -m venv .venv
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -e ".[jags,dev]"
-.venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cu126
-.venv/bin/python -c "import torch; assert torch.cuda.is_available(), torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"
+.venv/bin/pip install -q --force-reinstall torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
+.venv/bin/python -c "import torch; assert torch.cuda.is_available(); torch.zeros(1, device=\"cuda\"); print(torch.cuda.get_device_name(0))"
 make bootstrap-ort
 .venv/bin/python -m pytest -q
 make all
