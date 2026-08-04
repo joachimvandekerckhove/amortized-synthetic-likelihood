@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from asl.cov_data import (
     N_REP,
@@ -12,6 +13,8 @@ from asl.cov_data import (
     R,
     SEED_DEFAULT,
     c1_column_names,
+    check_summary_mi_gate,
+    check_summary_variance_gate,
     cov_settings_path,
     draw_parameters,
     expected_columns,
@@ -20,6 +23,7 @@ from asl.cov_data import (
     resolve_cov_settings,
     save_cov_settings,
     summaries_to_logspace,
+    validate_cov_training_data,
     z_mean_column_names,
 )
 from asl.data import summary_column_masks
@@ -92,3 +96,41 @@ class TestCovSettingsIO:
     def test_load_missing_returns_defaults(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         assert load_cov_settings("missing") == (N_REP, R)
+
+
+class TestCovTrainingQA:
+    def test_summary_variance_gate_passes(self, toy_model):
+        rng = np.random.default_rng(0)
+        y_raw = np.column_stack(
+            [
+                rng.uniform(0.4, 0.6, 300),
+                rng.uniform(0.3, 0.5, 300),
+                rng.uniform(0.01, 0.05, 300),
+            ]
+        )
+        check_summary_variance_gate(y_raw, toy_model)
+
+    def test_summary_variance_gate_fails_constant(self, toy_model):
+        y_raw = np.tile(np.array([0.5, 0.4, 0.02]), (50, 1))
+        with pytest.raises(SystemExit):
+            check_summary_variance_gate(y_raw, toy_model)
+
+    def test_validate_cov_training_data_runs(self, toy_model, config_file):
+        config_file(
+            "[cov_data]\n"
+            "summary_mi_permutations = 8\n"
+            "summary_mi_subsample = 200\n"
+        )
+        rng = np.random.default_rng(1)
+        n = 400
+        X = np.column_stack(
+            [rng.uniform(lo, hi, n) for lo, hi in toy_model.param_bounds]
+        )
+        y_raw = np.column_stack(
+            [
+                np.clip(0.5 + 0.1 * X[:, 0], 0.01, 0.99),
+                0.3 + 0.05 * X[:, 1] + 0.01 * rng.standard_normal(n),
+                0.01 + 0.001 * np.abs(X[:, 0]) + 0.001 * rng.standard_normal(n),
+            ]
+        )
+        validate_cov_training_data(X, y_raw, toy_model)

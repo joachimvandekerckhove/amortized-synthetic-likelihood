@@ -46,7 +46,7 @@ def test_ddm4_summary_dim():
 
 def test_collapse_summary_dim():
     cells = build_cells(summary="collapse")
-    assert cells["obs_raw"].shape[1] == 10
+    assert cells["obs_raw"].shape[1] == 4
 
 
 def test_jags_models_use_sl_and_raw_obs():

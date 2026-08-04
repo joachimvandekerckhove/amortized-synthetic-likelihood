@@ -2,7 +2,7 @@
 asl.data -- Dataset loading and target transformations for the training stage.
 
 Loads CSV files produced by asl.cov_data, applies input standardization
-(StandardScaler) and target transforms (log1p on RT columns + joint
+(StandardScaler) and target transforms (log1p on registered columns + joint
 standardization).  Provides inverse transforms for recovering original units.
 """
 
@@ -16,44 +16,29 @@ from sklearn.preprocessing import StandardScaler
 from asl.spec import Model
 
 
-def _is_proportion_summary(name: str) -> bool:
-    """Return True if a summary is a bounded rate/proportion (not RT-based)."""
-    low = name.lower()
-    if "rt" in low:
-        return False
-    return any(k in low for k in ("acc", "rate", "prob"))
+def log1p_mask(model: Model) -> np.ndarray:
+    """Return a boolean mask for summaries registered with log1p transform."""
+    return np.array(
+        [transform == "log1p" for transform in model.summary_transforms],
+        dtype=bool,
+    )
 
 
 def summary_column_masks(model: Model) -> tuple[np.ndarray, np.ndarray]:
-    """Return boolean masks for RT and proportion summary columns.
-
-    Parameters
-    ----------
-    model : Model
-
-    Returns
-    -------
-    rt_mask : np.ndarray of bool, shape (n_summaries,)
-    prop_mask : np.ndarray of bool, shape (n_summaries,)
-    """
-    rt_mask = np.array(
-        [not _is_proportion_summary(name) for name in model.summary_names],
-        dtype=bool,
-    )
-    prop_mask = ~rt_mask
-    return rt_mask, prop_mask
+    """Return boolean masks for log1p and identity summary columns."""
+    rt_mask = log1p_mask(model)
+    return rt_mask, ~rt_mask
 
 
 def count_rt_columns(model: Model) -> int:
-    """Count RT-based summary columns (receive log1p before scaling)."""
-    rt_mask, _ = summary_column_masks(model)
-    return int(rt_mask.sum())
+    """Count summary columns registered for log1p before scaling."""
+    return int(log1p_mask(model).sum())
 
 
 class TargetTransform:
     """Transform targets for neural network training.
 
-    Applies log1p to RT columns, then jointly standardizes all columns.
+    Applies log1p to registered columns, then jointly standardizes all columns.
     The transform is invertible for export and R-squared evaluation.
     """
 
@@ -63,20 +48,19 @@ class TargetTransform:
         Parameters
         ----------
         rt_mask : np.ndarray of bool, shape (n_targets,)
-            True for columns that receive log1p (RT summaries).
+            True for columns that receive log1p.
         """
         self.rt_mask = np.asarray(rt_mask, dtype=bool)
         self.scaler = StandardScaler()
 
     @classmethod
     def from_model(cls, model: Model) -> "TargetTransform":
-        """Build a transform from a model's summary column layout."""
-        rt_mask, _ = summary_column_masks(model)
-        return cls(rt_mask)
+        """Build a transform from a model's registered summary transforms."""
+        return cls(log1p_mask(model))
 
     @property
     def n_rt_columns(self) -> int:
-        """Number of RT columns (for backward-compatible export metadata)."""
+        """Number of log1p columns (for backward-compatible export metadata)."""
         return int(self.rt_mask.sum())
 
     def _apply_log1p(self, y: np.ndarray) -> np.ndarray:

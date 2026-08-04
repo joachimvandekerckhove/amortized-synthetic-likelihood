@@ -5,10 +5,10 @@ cognitive models with intractable likelihoods*. Four models are covered:
 
 | Model | Parameters | Summaries | Architecture | Epochs |
 |---|---|---|---|---|
-| `ddm3` | v, a, t0 | acc, rt\_mean, rt\_var | DeepWide\_24x4 | 10,000 |
-| `ddm4` | v, a, t0, w | rt\_mean/var (corr + err), err\_rate | DeepWide\_32x6 | 10,000 |
-| `ddmcollapsesig` | a0, v, k, t0 | acc, rt quantiles (5th–95th, corr + err) | DeepWide\_32x6 | 10,000 |
-| `dw` | logit\_epsilon, logit\_mu | 6 opinion-dynamics summaries | DeepWide\_32x6 | 10,000 |
+| `ddm3` | v, a, t0 | acc, rt\_mean, rt\_var | DeepWide\_24x4 | 25,000 |
+| `ddm4` | v, a, t0, w | rt\_mean/var (corr + err), err\_rate | DeepWide\_32x6 | 25,000 |
+| `ddmcollapsesig` | a0, v, k, t0 | acc, rt\_q10, var\_t1, var\_t3\_minus\_t1 | DeepWide\_32x6 | 25,000 |
+| `dw` | logit\_epsilon, logit\_mu | 6 opinion-dynamics summaries | DeepWide\_32x6 | 25,000 |
 
 The `ddmcollapsesig` model has a sigmoid collapsing boundary
 `a(t) = a0 / (1 + exp(k t))`. The collapse rate k has no known forward
@@ -104,7 +104,7 @@ ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3 confirm-recovery
 
 | Parameter | Default |
 |---|---|
-| `training_epochs` | 10,000 |
+| `training_epochs` | 25,000 |
 | `batch_size` | 4,096 |
 | `parameter_draws` (training data) | 20,000 |
 | `trials_per_replicate` | 600 |
@@ -205,17 +205,17 @@ make ddmcollapsesig
 Inference:
 
 ```
-obs[1:10] ~ ddmcollapsesig_sl(a0, v, k, t0, n_trials)
+obs[1:4] ~ ddmcollapsesig_sl(a0, v, k, t0, n_trials)
 ```
 
 Expected recovery:
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
-| a0 | 0.942 | 0.952 |
-| v | 0.990 | 0.940 |
-| k | 0.958 | 0.940 |
-| t0 | 0.994 | 0.962 |
+| a0 | 0.963 | 0.926 |
+| v | 0.997 | 0.968 |
+| k | 0.912 | 0.930 |
+| t0 | 0.988 | 0.948 |
 
 ### 4.4 `dw`
 

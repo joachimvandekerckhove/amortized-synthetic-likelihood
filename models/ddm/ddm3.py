@@ -10,20 +10,23 @@ import numpy as np
 
 from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
+from models.ddm.bounds import (
+    DDM3_PRIOR_BOUNDS,
+    DDM3_RECOVERY_PRIORS,
+    DDM3_TRAINING_BOUNDS,
+)
 from models.ddm.simulator import simulate_ddm_paths_biased
 
 FIXED_BIAS = 0.5
 
 PARAM_NAMES = ("v", "a", "t0")
-PARAM_BOUNDS = ((-2.0, 2.0), (0.5, 2.0), (0.15, 0.45))
+PARAM_BOUNDS = DDM3_TRAINING_BOUNDS
+PRIOR_BOUNDS = DDM3_PRIOR_BOUNDS
 SUMMARY_NAMES = ("acc", "rt_mean", "rt_var")
+SUMMARY_TRANSFORMS = ("identity", "log1p", "log1p")
 N_SUMMARIES = len(SUMMARY_NAMES)
 
-RECOVERY_PRIORS = {
-    "v": "v ~ dnorm(0, 0.25)",
-    "a": "a ~ dunif(0.3, 2.5)",
-    "t0": "t0 ~ dunif(0.1, 0.5)",
-}
+RECOVERY_PRIORS = DDM3_RECOVERY_PRIORS
 
 
 def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
@@ -59,11 +62,12 @@ DDM3 = Model(
     slug="ddm3",
     param_names=PARAM_NAMES,
     param_bounds=PARAM_BOUNDS,
+    prior_bounds=PRIOR_BOUNDS,
     summary_names=SUMMARY_NAMES,
+    summary_transforms=SUMMARY_TRANSFORMS,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
     default_architecture="DeepWide_24x4",
-    default_n_epochs=10000,
 )

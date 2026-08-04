@@ -89,7 +89,7 @@ def ddm4_summaries(subset: pd.DataFrame) -> np.ndarray:
 
 
 def collapse_summaries(subset: pd.DataFrame) -> np.ndarray:
-    """Accuracy and RT quantile summaries for ddmcollapsesig emulators."""
+    """Accuracy, RT tail, and tertile variance summaries for ddmcollapsesig."""
     choices = subset["response"].astype(np.int8).to_numpy()
     summaries = summaries_from_paths(subset["rt"].astype(float).to_numpy(), choices)
     return summaries.astype(np.float64)
