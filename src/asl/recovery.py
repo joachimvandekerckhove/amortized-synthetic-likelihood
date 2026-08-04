@@ -3,13 +3,10 @@
 import json
 import sys
 import time
-from itertools import product
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
 import numpy as np
-from asl.ort_env import cpu_inference_session
-from scipy.optimize import minimize
 
 from asl.config import load_config
 from asl.data import load_target_transform
@@ -96,6 +93,27 @@ def resolve_recovery_settings() -> dict:
     }
 
 
+def iqr_interval(lo: float, hi: float) -> tuple[float, float]:
+    """Interquartile range for a uniform distribution on (lo, hi)."""
+    span = hi - lo
+    return lo + 0.25 * span, lo + 0.75 * span
+
+
+def compute_chain_initial_values(model: Model, rng_seed: int) -> list[dict]:
+    """Draw one uniform start per chain over each parameter's IQR."""
+    bounds = model.prior_bounds
+    rng = np.random.default_rng(rng_seed)
+    inits = []
+    for _ in range(N_CHAINS):
+        inits.append(
+            {
+                name: float(rng.uniform(*iqr_interval(lo, hi)))
+                for name, (lo, hi) in zip(model.param_names, bounds)
+            }
+        )
+    return inits
+
+
 def simulate_subject_observations(
     model: Model,
     params: np.ndarray,
@@ -119,75 +137,12 @@ def build_jags_model_string(model: Model, obs: dict) -> str:
     return "\n".join(lines)
 
 
-def _compute_mle_initial_values(
-    model: Model, z: np.ndarray, onnx_path: Path
-) -> list[dict]:
-    """MLE-based chain inits using the emulator mean head (internal standardized space)."""
-    session = cpu_inference_session(onnx_path)
-    n = model.n_summaries
-
-    bounds = model.prior_bounds
-
-    def neg_log_lik(params: np.ndarray) -> float:
-        for i, (lo, hi) in enumerate(bounds):
-            if params[i] <= lo or params[i] >= hi:
-                return 1e12
-        x = params.astype(np.float32).reshape(1, -1)
-        pred = session.run(None, {"input": x})[0][0]
-        mu = pred[:n]
-        return float(0.5 * np.sum((mu - z) ** 2))
-
-    if model.n_params <= 3:
-        grid_vals = [
-            np.linspace(lo + (hi - lo) * 0.2, hi - (hi - lo) * 0.2, 3)
-            for lo, hi in bounds
-        ]
-        grid_starts = [np.array(pt) for pt in product(*grid_vals)]
-    else:
-        v_lo, v_hi = bounds[0]
-        t0_lo, t0_hi = bounds[2]
-        v_vals = np.linspace(v_lo + 0.2 * (v_hi - v_lo), v_hi - 0.2 * (v_hi - v_lo), 3)
-        a_vals = np.array([0.8, 1.5])
-        t0_vals = np.array([(t0_lo + t0_hi) / 2.0])
-        w_vals = np.array([0.3, 0.5, 0.7])
-        grid_starts = [
-            np.array([v, a, t0, w])
-            for v, a, t0, w in product(v_vals, a_vals, t0_vals, w_vals)
-        ]
-
-    best_result = None
-    for x0 in grid_starts:
-        res = minimize(
-            neg_log_lik,
-            x0,
-            method="Nelder-Mead",
-            options={"maxiter": 500, "xatol": 1e-4, "fatol": 1e-6},
-        )
-        if best_result is None or res.fun < best_result.fun:
-            best_result = res
-
-    mle = best_result.x  # type: ignore[union-attr]
-    jitter_scale = np.array([(hi - lo) * 0.02 for lo, hi in bounds])
-
-    rng = np.random.default_rng(99)
-    inits = []
-    for _ in range(N_CHAINS):
-        jittered = {}
-        for i, name in enumerate(model.param_names):
-            lo, hi = bounds[i]
-            val = float(mle[i]) + rng.normal(0, jitter_scale[i])
-            jittered[name] = float(np.clip(val, lo + 1e-4, hi - 1e-4))
-        inits.append(jittered)
-    return inits
-
-
 def _recover_one_subject(args: tuple) -> dict | None:
-    slug, true_params, subj_seed, settings, onnx_path_str = args
+    slug, true_params, subj_seed, settings = args
     from py2jags import run_jags
 
     model = get_model(slug)
-    target_transform = load_target_transform(slug)
-    onnx_path = Path(onnx_path_str)
+    load_target_transform(slug)
     module_name = f"{model.slug}_emulator"
 
     obs = simulate_subject_observations(
@@ -198,12 +153,11 @@ def _recover_one_subject(args: tuple) -> dict | None:
 
     model_string = build_jags_model_string(model, obs)
     obs_raw = np.asarray(obs["obs"], dtype=np.float64)
-    z = target_transform.transform(obs_raw.reshape(1, -1))[0]
     data = {
         "obs": obs_raw.tolist(),
         "n_trials": settings["n_trials"],
     }
-    inits = _compute_mle_initial_values(model, z, onnx_path)
+    inits = compute_chain_initial_values(model, subj_seed)
 
     try:
         result = run_jags(
@@ -268,6 +222,7 @@ def run_recovery_study(model: Model) -> None:
     load_target_transform(slug)
     print(f"[recovery] Model: {slug}")
     print(f"[recovery] Settings: {settings}")
+    print("[recovery] Chain inits: uniform on per-parameter IQR of prior bounds")
 
     n_chains = settings["n_chains"]
     max_workers = resolve_recovery_workers(n_chains)
@@ -284,7 +239,7 @@ def run_recovery_study(model: Model) -> None:
         for i, (lo, hi) in enumerate(recovery_bounds):
             true_params[i] = rng.uniform(lo, hi)
         subj_seed = 1000 + subj
-        work_items.append((slug, true_params, subj_seed, settings, str(onnx_path)))
+        work_items.append((slug, true_params, subj_seed, settings))
 
     true_params_list = []
     estimated_params_list = []

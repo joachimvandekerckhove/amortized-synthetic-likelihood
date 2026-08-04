@@ -25,7 +25,7 @@ class Model:
     param_bounds
         Training / emulator input domain (cov_data draws, wire ONNX limits).
     prior_bounds
-        Recovery subject draws and MLE warm-start support.
+        Recovery subject draws and chain initial-value support.
     summary_transforms
         Per-summary target transform before joint standardization.
     """

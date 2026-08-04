@@ -7,8 +7,11 @@ import pytest
 from asl.recovery import (
     COVERAGE_HI,
     COVERAGE_LO,
+    N_CHAINS,
     check_coverage_gate,
+    compute_chain_initial_values,
     format_recovery_progress,
+    iqr_interval,
     recovery_report_interval,
     resolve_recovery_settings,
     run_recovery_study,
@@ -67,6 +70,25 @@ class TestCheckCoverageGate:
         coverages = [COVERAGE_HI] * toy_model.n_params
         with pytest.raises(SystemExit):
             check_coverage_gate(coverages, toy_model.param_names)
+
+
+class TestChainInitialValues:
+    def test_iqr_interval_for_unit_range(self):
+        assert iqr_interval(0.0, 1.0) == (0.25, 0.75)
+
+    def test_chain_inits_within_iqr(self, toy_model):
+        bounds = toy_model.prior_bounds
+        inits = compute_chain_initial_values(toy_model, rng_seed=42)
+        assert len(inits) == N_CHAINS
+        for init in inits:
+            for name, (lo, hi) in zip(toy_model.param_names, bounds):
+                q1, q3 = iqr_interval(lo, hi)
+                assert q1 <= init[name] <= q3
+
+    def test_chain_inits_reproducible(self, toy_model):
+        a = compute_chain_initial_values(toy_model, rng_seed=7)
+        b = compute_chain_initial_values(toy_model, rng_seed=7)
+        assert a == b
 
 
 class TestRunRecoveryStudy:

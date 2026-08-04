@@ -320,7 +320,7 @@ If I ask you to commit artifacts, follow the pattern of existing models:
 |---|---|---|
 | Many invalid rows in `generate-data` | simulator returns NaN too often | tighten bounds; increase `trials_per_replicate` via `asl.toml` |
 | Training R² below threshold | insensitive summaries; wrong transforms; too few rows | rerun Step 3; check summary names; try larger architecture |
-| Recovery coverage too low | emulator bias; poor MLE init | check `wire-to-jags` succeeded; inspect `figures/SLUG/recovery.pdf` |
+| Recovery coverage too low | emulator bias; poor chain mixing | check `wire-to-jags` succeeded; inspect `figures/SLUG/recovery.pdf` |
 | Recovery coverage too high | overdispersed emulator; SL miswired | confirm `build_sl_likelihood_line` slug matches JNNX package name |
 | `wire-to-jags` fails | missing ONNX Runtime or g++ | set `onnxruntime_dir`; install build tools |
 | Parameter not recovered | summary not sensitive to that param | return to Step 3; add or replace summaries |
