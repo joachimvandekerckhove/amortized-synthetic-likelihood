@@ -256,7 +256,7 @@ Reference values (approximate; small differences on CPU are fine):
 | `ddmcollapsesig` | 0.99969 |
 | `dw` | 0.99928 |
 
-### Recovery (`results/MODEL/recovery_summary.json`)
+### Recovery (`results/MODEL/recovery_summary.json`, `results/MODEL/recovery_subjects.json`)
 
 The pipeline prints `[recovery] PASS` on success. Check:
 
@@ -304,7 +304,9 @@ comparable, not identical):
 
 ### Diagnostic plot
 
-`figures/MODEL/recovery.pdf` should be created after recovery.
+`figures/MODEL/recovery.pdf` should be created after recovery (2-column paper-style
+multipanel plot). `results/MODEL/recovery_subjects.json` stores per-subject true,
+estimated, CI, and R-hat arrays for paper figure scripts.
 
 ## What not to do
 

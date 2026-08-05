@@ -55,9 +55,10 @@ data/SLUG/cov_train.csv
 results/SLUG/model.onnx
 results/SLUG/final_summary.json
 results/SLUG/recovery_summary.json
+results/SLUG/recovery_subjects.json
 models/SLUG.jnnx/
   obs_transform.json                  raw-summary transforms (JNNX v2; written by wire-to-jags)
-figures/SLUG/recovery.pdf
+figures/SLUG/recovery.pdf             2-column paper-style recovery multipanel
 ```
 
 ## Step 1: Specify the generative model
@@ -275,6 +276,7 @@ Verify:
 - `data/SLUG/cov_train.csv` created (or committed data present)
 - `results/SLUG/final_summary.json` — R² >= 0.999 in `final_summary.json`
 - `results/SLUG/recovery_summary.json` — pipeline prints `[recovery] PASS`
+- `results/SLUG/recovery_subjects.json` — per-subject arrays for paper figures
 
 If training fails, fix the simulator or summaries before a full rerun. Common
 causes: too many NaN rows in training data, summaries not sensitive to params,

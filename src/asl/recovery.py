@@ -200,6 +200,31 @@ def _recover_one_subject(args: tuple) -> dict | None:
     }
 
 
+def write_recovery_subjects(
+    model: Model,
+    true_params: np.ndarray,
+    estimated_params: np.ndarray,
+    ci_lower: np.ndarray,
+    ci_upper: np.ndarray,
+    rhats: np.ndarray,
+    results_dir: Path,
+) -> Path:
+    """Write legacy per-subject recovery arrays for paper figure scripts."""
+    payload = {
+        "param_names": list(model.param_names),
+        "param_bounds": [list(bounds) for bounds in model.prior_bounds],
+        "true": true_params.tolist(),
+        "est": estimated_params.tolist(),
+        "ci_lo": ci_lower.tolist(),
+        "ci_hi": ci_upper.tolist(),
+        "rhat": rhats.tolist(),
+    }
+    path = results_dir / "recovery_subjects.json"
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    return path
+
+
 def run_recovery_study(model: Model) -> None:
     """Run a simulate-and-recover study."""
     ensure_onnxruntime_lib_on_path()
@@ -286,6 +311,20 @@ def run_recovery_study(model: Model) -> None:
     est_params_arr = np.array(estimated_params_list)
     ci_lower_arr = np.array(ci_lower_list)
     ci_upper_arr = np.array(ci_upper_list)
+    rhat_arr = np.array(rhat_list)
+
+    results_dir = Path("results") / slug
+    results_dir.mkdir(parents=True, exist_ok=True)
+    subjects_path = write_recovery_subjects(
+        model,
+        true_params_arr,
+        est_params_arr,
+        ci_lower_arr,
+        ci_upper_arr,
+        rhat_arr,
+        results_dir,
+    )
+    print(f"[recovery] Per-subject arrays: {subjects_path}")
 
     figures_dir = Path("figures") / slug
     figures_dir.mkdir(parents=True, exist_ok=True)
