@@ -59,6 +59,22 @@ def test_plot_recovery_diagnostics_writes_pdf(toy_model, tmp_path):
     assert out.stat().st_size > 0
 
 
+def test_plot_recovery_diagnostics_uses_paper_style(toy_model, tmp_path):
+    import matplotlib.pyplot as plt
+
+    rng = np.random.default_rng(3)
+    n = 8
+    true = rng.uniform(-1, 1, size=(n, toy_model.n_params))
+    est = true + rng.normal(0, 0.05, size=true.shape)
+    ci_lo = est - 0.1
+    ci_hi = est + 0.1
+    out = tmp_path / "recovery.pdf"
+    plot_recovery_diagnostics(toy_model, true, est, ci_lo, ci_hi, out)
+    assert plt.rcParams["font.size"] == 8.0
+    assert plt.rcParams["axes.labelsize"] == 8.0
+    assert plt.rcParams["xtick.labelsize"] == 7.0
+
+
 def test_plot_recovery_diagnostics_four_param_grid(tmp_path):
     def simulate(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
         return np.ones(4, dtype=np.float64)
@@ -80,4 +96,30 @@ def test_plot_recovery_diagnostics_four_param_grid(tmp_path):
     ci_hi = est + 0.1
     out = tmp_path / "recovery.pdf"
     plot_recovery_diagnostics(model, true, est, ci_lo, ci_hi, out)
+    assert out.exists()
+
+
+def test_plot_recovery_diagnostics_dw_canonical_scale(tmp_path):
+    from models.social.dw import DW, logit_array_to_canonical
+
+    rng = np.random.default_rng(4)
+    n = 20
+    true_logit = rng.uniform(-3, 3, size=(n, 2))
+    est_logit = true_logit + rng.normal(0, 0.1, size=true_logit.shape)
+    ci_lo_logit = est_logit - 0.2
+    ci_hi_logit = est_logit + 0.2
+    true = logit_array_to_canonical(true_logit)
+    est = logit_array_to_canonical(est_logit)
+    ci_lo = logit_array_to_canonical(ci_lo_logit)
+    ci_hi = logit_array_to_canonical(ci_hi_logit)
+    out = tmp_path / "recovery_canonical.pdf"
+    plot_recovery_diagnostics(
+        DW,
+        true,
+        est,
+        ci_lo,
+        ci_hi,
+        out,
+        param_names=("epsilon", "mu"),
+    )
     assert out.exists()

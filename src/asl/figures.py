@@ -11,11 +11,14 @@ import numpy as np
 
 from asl.spec import Model
 
+MPLSTYLE_PATH = Path(__file__).resolve().parent / "paper_figure.mplstyle"
+
 COLUMN_WIDTH_IN = 3.45
 ERRORBAR_MS = 2.5
 ERRORBAR_CAPSIZE = 1.5
 RECOVERY_MARKER_ALPHA = 0.3
 RECOVERY_WHISKER_ALPHA = 0.1
+RECOVERY_INSET_FONTSIZE = 6.3  # 7pt paper default, reduced 10%
 IDENTITY_LINE_KW = {"color": "#222222", "linewidth": 0.7, "alpha": 0.55}
 
 SERIES_COLORS = (
@@ -43,6 +46,10 @@ RECOVERY_PARAM_LABELS: dict[str, str] = {
     "t0": r"$t_0$",
     "w": r"$w$",
     "k": r"$k$",
+    "logit_epsilon": r"$\mathrm{logit}(\epsilon)$",
+    "logit_mu": r"$\mathrm{logit}(\mu)$",
+    "epsilon": r"$\epsilon$",
+    "mu": r"$\mu$",
 }
 RECOVERY_PARAM_SORT_ORDER: tuple[str, ...] = ("v", "a", "t0", "w", "k")
 
@@ -95,6 +102,10 @@ def column_figsize(ncols: int, nrows: int, *, aspect: float = 1.0, pad_in: float
     return (COLUMN_WIDTH_IN, nrows * panel_h + pad_in)
 
 
+def _apply_paper_style() -> None:
+    plt.style.use(MPLSTYLE_PATH)
+
+
 def _style_axes(ax: plt.Axes) -> None:
     ax.tick_params(direction="out", length=2.5, width=0.8)
     for spine in ax.spines.values():
@@ -118,10 +129,14 @@ def plot_recovery_diagnostics(
     ci_lower: np.ndarray,
     ci_upper: np.ndarray,
     output_path: Path,
+    *,
+    param_names: tuple[str, ...] | None = None,
 ) -> None:
     """Create a 2-column paper-style recovery scatter PDF."""
-    order = canonical_recovery_sort_indices(model.param_names)
-    keys = tuple(model.param_names[i] for i in order)
+    _apply_paper_style()
+    names = param_names if param_names is not None else model.param_names
+    order = canonical_recovery_sort_indices(names)
+    keys = tuple(names[i] for i in order)
     true = true_params[:, order]
     est = estimated_params[:, order]
     ci_lo = ci_lower[:, order]
@@ -181,7 +196,25 @@ def plot_recovery_diagnostics(
         ax.set_xlabel(f"True {labels[i]}")
         ax.set_ylabel(f"Posterior mean {labels[i]}")
         r = float(np.corrcoef(x, y)[0, 1])
-        ax.text(0.05, 0.95, rf"$r={r:.3f}$", transform=ax.transAxes, va="top", fontsize=7)
+        cov = float(np.mean((x >= ci_lo[:, i]) & (x <= ci_hi[:, i])))
+        ax.text(
+            0.05,
+            0.95,
+            rf"$r={r:.3f}$",
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            fontsize=RECOVERY_INSET_FONTSIZE,
+        )
+        ax.text(
+            0.95,
+            0.05,
+            rf"$\mathrm{{Cov.}}={cov:.3f}$",
+            transform=ax.transAxes,
+            va="bottom",
+            ha="right",
+            fontsize=RECOVERY_INSET_FONTSIZE,
+        )
 
     for j in range(n_params, nrows * ncols):
         row, col = divmod(j, ncols)

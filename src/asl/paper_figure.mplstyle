@@ -1,0 +1,18 @@
+# CIDLab paper figure defaults (see asl/figures.py).
+font.family: sans-serif
+font.sans-serif: Helvetica, DejaVu Sans, Arial, Liberation Sans
+mathtext.fontset: dejavusans
+font.size: 8
+axes.labelsize: 8
+axes.titlesize: 8
+xtick.labelsize: 7
+ytick.labelsize: 7
+legend.fontsize: 6.5
+lines.linewidth: 1.0
+axes.linewidth: 0.8
+xtick.major.width: 0.8
+ytick.major.width: 0.8
+figure.dpi: 120
+savefig.dpi: 300
+pdf.fonttype: 42
+ps.fonttype: 42
