@@ -8,7 +8,7 @@ cognitive models with intractable likelihoods*. Four models are covered:
 | `ddm3` | v, a, t0 | acc, rt\_mean, rt\_var | DeepWide\_24x4 | 25,000 |
 | `ddm4` | v, a, t0, w | rt\_mean/var (corr + err), err\_rate | DeepWide\_32x6 | 25,000 |
 | `ddmcollapsesig` | a0, v, k, t0 | acc, rt\_q10, var\_t1, var\_t3\_minus\_t1 | DeepWide\_32x6 | 25,000 |
-| `dw` | logit\_epsilon, logit\_mu | 6 opinion-dynamics summaries | DeepWide\_32x6 | 25,000 |
+| `dw` | logit\_epsilon, logit\_mu | 6 opinion-dynamics summaries | DeepWide\_128x6 | 20,000 |
 
 The `ddmcollapsesig` model has a sigmoid collapsing boundary
 `a(t) = a0 / (1 + exp(k t))`. The collapse rate k has no known forward
@@ -17,9 +17,9 @@ natural showcase for the ASL approach.
 
 The `dw` model implements bounded-confidence opinion dynamics (Deffuant–Weisbuch):
 agents with opinions in `[0, 1]` interact pairwise and move toward each other
-when their opinions differ by less than epsilon. Inference uses logit
-parameterizations; training explores a slightly wider epsilon range than the
-recovery prior.
+when their opinions differ by less than epsilon. Canonical epsilon spans
+`[0.12, 0.35]` and mu `[0.08, 0.40]` via logit inputs; recovery uses uniform
+logit priors on `[-4, 4]`. Pipeline overrides live in `configs/dw.toml`.
 
 ## How it works
 
@@ -110,11 +110,10 @@ ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3 confirm-recovery
 | `trials_per_replicate` | 600 |
 | `replicates_per_parameter` | 120 |
 | `synthetic_subjects` (recovery) | 500 |
-| `trials_per_subject` (recovery) | 500 |
+| `trials_per_subject` (recovery) | 500 (`dw`: 600 via `configs/dw.toml`) |
 
-Committed `data/dw/cov_settings.json` records `n_rep = 500` (used when that
-training set was built). Regenerating `data/dw/` after changing defaults may
-differ.
+`make dw` layers `configs/dw.toml` (R=2000 replicates, lr=0.0003, batch 512).
+Regenerate `data/dw/` after changing cov-data settings.
 
 ## 4. Reproduction steps
 
@@ -245,8 +244,8 @@ Expected recovery (MCMC is stochastic; expect small differences across machines)
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
-| logit\_epsilon | 0.976 | 0.940 |
-| logit\_mu | 0.967 | 0.936 |
+| logit\_epsilon | 0.977 | 0.960 |
+| logit\_mu | 0.946 | 0.952 |
 
 ## 5. Coverage gates
 

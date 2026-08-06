@@ -2,8 +2,8 @@
 Deffuant-Weisbuch bounded-confidence opinion dynamics for ASL.
 
 Canonical parameters epsilon (confidence bound) and mu (compromise rate) are
-mapped from logit inputs. Epsilon training uses raw bounds [0.15, 0.85]; the
-inference prior uses [0.2, 0.8] (narrower, in raw epsilon units).
+mapped from logit inputs on training bounds epsilon in [0.12, 0.35] and
+mu in [0.08, 0.40]. Recovery uses uniform logit priors on [-4, 4].
 """
 
 from __future__ import annotations
@@ -15,12 +15,10 @@ from asl.spec import Model
 
 PARAM_NAMES = ("logit_epsilon", "logit_mu")
 PARAM_BOUNDS = ((-4.0, 4.0), (-4.0, 4.0))
+PRIOR_PARAM_BOUNDS = PARAM_BOUNDS
 
-TRAINING_EPSILON_MIN = 0.15
-TRAINING_EPSILON_MAX = 0.85
-PRIOR_EPSILON_MIN = 0.2
-PRIOR_EPSILON_MAX = 0.8
-
+EPSILON_MIN = 0.12
+EPSILON_MAX = 0.35
 CANONICAL_MU_MIN = 0.08
 CANONICAL_MU_MAX = 0.40
 
@@ -75,14 +73,13 @@ def _run_interactions(
             opinions[j] += mu * (opinions[i] - opinions[j])
 
 
-def _is_degenerate_run(waves: list[np.ndarray], mu: float, epsilon: float) -> bool:
+def _is_degenerate_run(waves: list[np.ndarray], mu: float) -> bool:
     if mu < CANONICAL_MU_MIN:
         return False
     total_movement = 0.0
     for left, right in zip(waves[:-1], waves[1:]):
         total_movement += float(np.mean(np.abs(right - left)))
-    movement_floor = max(0.001, 0.05 * epsilon)
-    return total_movement < movement_floor
+    return total_movement < 0.001
 
 
 def _simulate_opinion_waves(
@@ -103,7 +100,7 @@ def _simulate_opinion_waves(
         opinions = np.clip(opinions, 0.0, 1.0)
         waves.append(opinions.copy())
 
-    if _is_degenerate_run(waves, mu, epsilon):
+    if _is_degenerate_run(waves, mu):
         return None
     return waves
 
@@ -137,40 +134,9 @@ def _sigmoid(x: float) -> float:
     return float(1.0 / (1.0 + np.exp(-x)))
 
 
-def _logit_from_unit_interval(u: float) -> float:
-    u = float(np.clip(u, 1e-6, 1.0 - 1e-6))
-    return float(np.log(u / (1.0 - u)))
-
-
-def _logit_from_epsilon(
-    epsilon: float,
-    eps_lo: float = TRAINING_EPSILON_MIN,
-    eps_hi: float = TRAINING_EPSILON_MAX,
-) -> float:
-    frac = (epsilon - eps_lo) / (eps_hi - eps_lo)
-    return _logit_from_unit_interval(frac)
-
-
-def _epsilon_from_logit(
-    logit_epsilon: float,
-    eps_lo: float = TRAINING_EPSILON_MIN,
-    eps_hi: float = TRAINING_EPSILON_MAX,
-) -> float:
-    return eps_lo + (eps_hi - eps_lo) * _sigmoid(logit_epsilon)
-
-
-LOGIT_EPSILON_PRIOR_BOUNDS = (
-    _logit_from_epsilon(PRIOR_EPSILON_MIN),
-    _logit_from_epsilon(PRIOR_EPSILON_MAX),
-)
-
-PRIOR_PARAM_BOUNDS = (LOGIT_EPSILON_PRIOR_BOUNDS, (-4.0, 4.0))
-
-
 def _to_epsilon_mu(logit_epsilon: float, logit_mu: float) -> tuple[float, float]:
-    epsilon = _epsilon_from_logit(logit_epsilon)
-    mu_span = CANONICAL_MU_MAX - CANONICAL_MU_MIN
-    mu = CANONICAL_MU_MIN + mu_span * _sigmoid(logit_mu)
+    epsilon = EPSILON_MIN + (EPSILON_MAX - EPSILON_MIN) * _sigmoid(logit_epsilon)
+    mu = CANONICAL_MU_MIN + (CANONICAL_MU_MAX - CANONICAL_MU_MIN) * _sigmoid(logit_mu)
     return epsilon, mu
 
 
@@ -178,12 +144,16 @@ def to_canonical(params: np.ndarray) -> tuple[float, float]:
     return _to_epsilon_mu(float(params[0]), float(params[1]))
 
 
-def draw_training_logit_parameters(rng: np.random.Generator) -> np.ndarray:
-    epsilon = rng.uniform(TRAINING_EPSILON_MIN, TRAINING_EPSILON_MAX)
-    logit_eps = _logit_from_epsilon(epsilon)
-    lo_mu, hi_mu = PARAM_BOUNDS[1]
-    logit_mu = rng.uniform(lo_mu, hi_mu)
-    return np.array([logit_eps, logit_mu], dtype=np.float64)
+def logit_array_to_canonical(params: np.ndarray) -> np.ndarray:
+    """Map (n, 2) logit parameters to canonical (epsilon, mu)."""
+    arr = np.asarray(params, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    logit_eps = arr[:, 0]
+    logit_mu = arr[:, 1]
+    epsilon = EPSILON_MIN + (EPSILON_MAX - EPSILON_MIN) / (1.0 + np.exp(-logit_eps))
+    mu = CANONICAL_MU_MIN + (CANONICAL_MU_MAX - CANONICAL_MU_MIN) / (1.0 + np.exp(-logit_mu))
+    return np.column_stack([epsilon, mu])
 
 
 def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
@@ -202,12 +172,8 @@ def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarr
     return summaries
 
 
-def _dunif(lo: float, hi: float) -> str:
-    return f"dunif({round(lo, 4)}, {round(hi, 4)})"
-
-
 RECOVERY_PRIORS = {
-    "logit_epsilon": f"logit_epsilon ~ {_dunif(*LOGIT_EPSILON_PRIOR_BOUNDS)}",
+    "logit_epsilon": "logit_epsilon ~ dunif(-4, 4)",
     "logit_mu": "logit_mu ~ dunif(-4, 4)",
 }
 
@@ -224,10 +190,9 @@ DW = Model(
     prior_bounds=PRIOR_PARAM_BOUNDS,
     summary_names=SUMMARY_NAMES,
     summary_transforms=("identity",) * N_SUMMARIES,
-    draw_cov_parameters=draw_training_logit_parameters,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
-    default_architecture="DeepWide_32x6",
+    default_architecture="DeepWide_128x6",
 )
