@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from asl.data import load_target_transform
+from asl.figures import recovery_param_style
 from asl.onnxruntime_sdk import ensure_onnxruntime_lib_on_path
 from asl.recovery import (
     N_CHAINS,
@@ -37,7 +38,7 @@ from models.catalog import get_model
 
 SLUG = "ddm3"
 PARAM_NAMES = ("v", "a", "t0")
-PARAM_ORDER = ("v", "t0", "a")
+PARAM_ORDER = ("v", "a", "t0")
 PARAM_LABELS = {
     "v": r"Drift $v$",
     "t0": r"Non-decision $t_0$",
@@ -507,6 +508,7 @@ def plot_figure(data: dict, output_path: Path) -> None:
     cov = data["coverage_95"]
 
     for row, pname in enumerate(PARAM_ORDER):
+        sty = recovery_param_style(pname)
         asl_mean = np.asarray(asl["mean"][pname])
         ez_mean = np.asarray(ez["mean"][pname])
         asl_sd = np.asarray(asl["sd"][pname])
@@ -517,7 +519,12 @@ def plot_figure(data: dict, output_path: Path) -> None:
             _style_axes(ax)
 
         ax_mean.scatter(
-            asl_mean, ez_mean, s=SCATTER_SIZE, alpha=0.45, color="#404040", rasterized=True
+            asl_mean,
+            ez_mean,
+            s=SCATTER_SIZE,
+            alpha=0.45,
+            color=sty["color"],
+            rasterized=True,
         )
         lo, hi = _axis_limits(asl_mean, ez_mean)
         _identity_line(ax_mean, lo, hi)
@@ -528,7 +535,12 @@ def plot_figure(data: dict, output_path: Path) -> None:
         ax_mean.set_ylabel("EZ mean")
 
         ax_sd.scatter(
-            asl_sd, ez_sd, s=SCATTER_SIZE, alpha=0.45, color="#404040", rasterized=True
+            asl_sd,
+            ez_sd,
+            s=SCATTER_SIZE,
+            alpha=0.45,
+            color=sty["color"],
+            rasterized=True,
         )
         lo, hi = _axis_limits(asl_sd, ez_sd)
         _identity_line(ax_sd, lo, hi)
