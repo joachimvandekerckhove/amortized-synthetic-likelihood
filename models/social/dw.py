@@ -32,6 +32,8 @@ SUMMARY_NAMES = (
 )
 N_SUMMARIES = len(SUMMARY_NAMES)
 
+SUMMARY_TRANSFORMS = ("log1p", "log1p", "log1p", "log1p", "log1p", "identity")
+
 N_AGENTS = 150
 N_WAVES = 5
 N_BINS = 20
@@ -189,7 +191,7 @@ DW = Model(
     param_bounds=PARAM_BOUNDS,
     prior_bounds=PRIOR_PARAM_BOUNDS,
     summary_names=SUMMARY_NAMES,
-    summary_transforms=("identity",) * N_SUMMARIES,
+    summary_transforms=SUMMARY_TRANSFORMS,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,

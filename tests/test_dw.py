@@ -118,3 +118,11 @@ class TestModelSpec:
         assert DW.supports_recovery()
         assert DW.slug == "dw"
         assert DW.default_architecture == "DeepWide_128x6"
+        assert DW.summary_transforms == (
+            "log1p",
+            "log1p",
+            "log1p",
+            "log1p",
+            "log1p",
+            "identity",
+        )
