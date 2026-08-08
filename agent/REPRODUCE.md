@@ -315,6 +315,28 @@ comparable, not identical):
 multipanel plot). `results/MODEL/recovery_subjects.json` stores per-subject true,
 estimated, CI, and R-hat arrays for paper figure scripts.
 
+### N-stability (DDM models only)
+
+After `train-emulator` completes (`model.onnx` and `target_transform.pkl` exist):
+
+```bash
+make -C scripts/ddm3 evaluate-n-stability
+```
+
+Same target exists for `ddm4` and `ddmcollapsesig`. Outputs land in
+`results/MODEL/n_stability_summary.json`, `n_stability_table.tex`, and
+`n_stability_plot_data.npz`. Use `--quick` for a smoke run:
+
+```bash
+python scripts/evaluate_n_stability.py --slug ddm3 --quick
+```
+
+Remove cached batches before a full rerun:
+
+```bash
+rm -f results/MODEL/n_stability_*
+```
+
 ## What not to do
 
 - Do not edit `src/asl/presets/full.toml`

@@ -9,6 +9,7 @@ TRANSFORM   := $(ROOT)/results/$(MODEL)/target_transform.pkl
 ONNX        := $(ROOT)/results/$(MODEL)/model.onnx
 JNNX_DIR    := $(ROOT)/models/$(MODEL).jnnx
 RECOVERY    := $(ROOT)/results/$(MODEL)/recovery_summary.json
+N_STABILITY := $(ROOT)/results/$(MODEL)/n_stability_summary.json
 EZ_COMPARE  := $(ROOT)/figures/$(MODEL)/ez_compare.pdf
 
 .DEFAULT_GOAL := all
@@ -32,8 +33,14 @@ ez-compare: $(EZ_COMPARE)
 $(EZ_COMPARE): $(JNNX_DIR)/model.onnx
 	$(ENV) $(PY) $(ROOT)/scripts/$(MODEL)/ez_compare.py
 
+$(N_STABILITY): $(ONNX) $(TRANSFORM)
+	$(ENV) $(PY) $(ROOT)/scripts/evaluate_n_stability.py --slug $(MODEL)
+
+evaluate-n-stability: $(N_STABILITY)
+
 .PHONY: generate-data train-emulator wire-to-jags confirm-recovery ez-compare \
-        regenerate-data retrain rewire rerun-recovery reproduce clean clean-generated
+        evaluate-n-stability regenerate-data retrain rewire rerun-recovery \
+        reproduce clean clean-generated
 
 generate-data:
 	$(ENV) $(PY) $(RUN) generate-data

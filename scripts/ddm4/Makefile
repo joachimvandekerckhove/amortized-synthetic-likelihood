@@ -9,6 +9,7 @@ TRANSFORM   := $(ROOT)/results/$(MODEL)/target_transform.pkl
 ONNX        := $(ROOT)/results/$(MODEL)/model.onnx
 JNNX_DIR    := $(ROOT)/models/$(MODEL).jnnx
 RECOVERY    := $(ROOT)/results/$(MODEL)/recovery_summary.json
+N_STABILITY := $(ROOT)/results/$(MODEL)/n_stability_summary.json
 
 .DEFAULT_GOAL := all
 
@@ -27,7 +28,8 @@ $(RECOVERY): $(JNNX_DIR)/model.onnx
 	$(ENV) $(PY) $(RUN) confirm-recovery
 
 .PHONY: generate-data train-emulator wire-to-jags confirm-recovery \
-        regenerate-data retrain rewire rerun-recovery reproduce clean clean-generated
+        evaluate-n-stability regenerate-data retrain rewire rerun-recovery \
+        reproduce clean clean-generated
 
 generate-data:
 	$(ENV) $(PY) $(RUN) generate-data
@@ -40,6 +42,11 @@ wire-to-jags:
 
 confirm-recovery:
 	$(ENV) $(PY) $(RUN) confirm-recovery
+
+$(N_STABILITY): $(ONNX) $(TRANSFORM)
+	$(ENV) $(PY) $(ROOT)/scripts/evaluate_n_stability.py --slug $(MODEL)
+
+evaluate-n-stability: $(N_STABILITY)
 
 regenerate-data:
 	rm -f $(DATA)
