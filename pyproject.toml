@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-jags = ["py2jags @ git+https://github.com/joachimvandekerckhove/py2jags.git", "jnnx @ git+https://github.com/joachimvandekerckhove/jnnx.git@802762d"]
+jags = ["py2jags @ git+https://github.com/joachimvandekerckhove/py2jags.git@5b0c19ef5b6c1b614fa21dfade32401b2918c567", "jnnx @ git+https://github.com/joachimvandekerckhove/jnnx.git@802762d"]
 dev = ["pytest"]
 
 [tool.setuptools.packages.find]

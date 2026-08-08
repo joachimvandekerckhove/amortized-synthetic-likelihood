@@ -1,0 +1,7 @@
+cff-version: 1.2.0
+title: "Amortized synthetic likelihoods in Bayesian graphical models"
+message: "If you use this software, please cite it as below."
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/joachimvandekerckhove/amortized-synthetic-likelihood"
+doi: "TBD"
