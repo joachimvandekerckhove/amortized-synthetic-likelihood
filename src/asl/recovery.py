@@ -93,6 +93,24 @@ def resolve_recovery_settings() -> dict:
     }
 
 
+def resolve_true_param_bounds(model: Model) -> tuple[tuple[float, float], ...]:
+    """Bounds for drawing synthetic true parameters (defaults to model.prior_bounds)."""
+    config = load_config()
+    custom = config.get("recovery", "true_param_bounds", None)
+    if custom is None:
+        return model.prior_bounds
+    if len(custom) != model.n_params:
+        raise ValueError(
+            f"recovery.true_param_bounds length {len(custom)} "
+            f"!= n_params {model.n_params}"
+        )
+    bounds: list[tuple[float, float]] = []
+    for item in custom:
+        lo, hi = float(item[0]), float(item[1])
+        bounds.append((lo, hi))
+    return tuple(bounds)
+
+
 def iqr_interval(lo: float, hi: float) -> tuple[float, float]:
     """Interquartile range for a uniform distribution on (lo, hi)."""
     span = hi - lo
@@ -208,11 +226,15 @@ def write_recovery_subjects(
     ci_upper: np.ndarray,
     rhats: np.ndarray,
     results_dir: Path,
+    true_draw_bounds: tuple[tuple[float, float], ...] | None = None,
 ) -> Path:
     """Write legacy per-subject recovery arrays for paper figure scripts."""
+    inference_bounds = model.prior_bounds
+    draw_bounds = true_draw_bounds or inference_bounds
     payload = {
         "param_names": list(model.param_names),
-        "param_bounds": [list(bounds) for bounds in model.prior_bounds],
+        "param_bounds": [list(bounds) for bounds in inference_bounds],
+        "true_draw_bounds": [list(bounds) for bounds in draw_bounds],
         "true": true_params.tolist(),
         "est": estimated_params.tolist(),
         "ci_lo": ci_lower.tolist(),
@@ -247,6 +269,8 @@ def run_recovery_study(model: Model) -> None:
     load_target_transform(slug)
     print(f"[recovery] Model: {slug}")
     print(f"[recovery] Settings: {settings}")
+    true_draw_bounds = resolve_true_param_bounds(model)
+    print(f"[recovery] True-parameter draws: {true_draw_bounds}")
     print("[recovery] Chain inits: uniform on per-parameter IQR of prior bounds")
 
     n_chains = settings["n_chains"]
@@ -258,10 +282,9 @@ def run_recovery_study(model: Model) -> None:
 
     rng = np.random.default_rng(42)
     work_items = []
-    recovery_bounds = model.prior_bounds
     for subj in range(settings["n_subjects"]):
         true_params = np.empty(model.n_params)
-        for i, (lo, hi) in enumerate(recovery_bounds):
+        for i, (lo, hi) in enumerate(true_draw_bounds):
             true_params[i] = rng.uniform(lo, hi)
         subj_seed = 1000 + subj
         work_items.append((slug, true_params, subj_seed, settings))
@@ -323,6 +346,7 @@ def run_recovery_study(model: Model) -> None:
         ci_upper_arr,
         rhat_arr,
         results_dir,
+        true_draw_bounds=true_draw_bounds,
     )
     print(f"[recovery] Per-subject arrays: {subjects_path}")
 

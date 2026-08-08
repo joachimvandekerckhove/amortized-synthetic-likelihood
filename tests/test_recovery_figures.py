@@ -38,6 +38,7 @@ def test_write_recovery_subjects_payload_shape(toy_model, tmp_path):
     assert set(data) == {
         "param_names",
         "param_bounds",
+        "true_draw_bounds",
         "true",
         "est",
         "ci_lo",
@@ -100,18 +101,14 @@ def test_plot_recovery_diagnostics_four_param_grid(tmp_path):
 
 
 def test_plot_recovery_diagnostics_dw_canonical_scale(tmp_path):
-    from models.social.dw import DW, logit_array_to_canonical
+    from models.social.dw import DW
 
     rng = np.random.default_rng(4)
     n = 20
-    true_logit = rng.uniform(-3, 3, size=(n, 2))
-    est_logit = true_logit + rng.normal(0, 0.1, size=true_logit.shape)
-    ci_lo_logit = est_logit - 0.2
-    ci_hi_logit = est_logit + 0.2
-    true = logit_array_to_canonical(true_logit)
-    est = logit_array_to_canonical(est_logit)
-    ci_lo = logit_array_to_canonical(ci_lo_logit)
-    ci_hi = logit_array_to_canonical(ci_hi_logit)
+    true = rng.uniform([0.16, 0.12], [0.34, 0.38], size=(n, 2))
+    est = true + rng.normal(0, 0.01, size=true.shape)
+    ci_lo = est - 0.03
+    ci_hi = est + 0.03
     out = tmp_path / "recovery_canonical.pdf"
     plot_recovery_diagnostics(
         DW,
