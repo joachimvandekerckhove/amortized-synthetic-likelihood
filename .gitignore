@@ -3,7 +3,11 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
-results/
+results/**
+!results/**/
+!results/**/n_stability_summary.json
+!results/**/n_stability_table.tex
+!results/**/n_stability_plot_data.npz
 figures/
 tmp/
 models/*.jnnx/
