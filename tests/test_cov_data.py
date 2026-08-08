@@ -7,6 +7,8 @@ import json
 import numpy as np
 import pytest
 
+from dataclasses import replace
+
 from asl.cov_data import (
     N_REP,
     N_THETA,
@@ -134,3 +136,12 @@ class TestCovTrainingQA:
             ]
         )
         validate_cov_training_data(X, y_raw, toy_model)
+
+    def test_draw_parameters_uses_model_hook(self, toy_model):
+        rng = np.random.default_rng(0)
+        custom = np.array([0.1, 0.2], dtype=np.float64)
+        hooked = replace(
+            toy_model,
+            draw_cov_parameters=lambda _rng: custom.copy(),
+        )
+        assert np.array_equal(draw_parameters(hooked, rng), custom)
