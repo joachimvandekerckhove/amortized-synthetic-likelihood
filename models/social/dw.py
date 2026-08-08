@@ -75,17 +75,10 @@ def _run_interactions(
         i, j = rng.choice(n_agents, size=2, replace=False)
         diff = abs(opinions[i] - opinions[j])
         if diff <= epsilon:
-            opinions[i] += mu * (opinions[j] - opinions[i])
-            opinions[j] += mu * (opinions[i] - opinions[j])
-
-
-def _is_degenerate_run(waves: list[np.ndarray], mu: float) -> bool:
-    if mu < TRAINING_MU_BOUNDS[0]:
-        return False
-    total_movement = 0.0
-    for left, right in zip(waves[:-1], waves[1:]):
-        total_movement += float(np.mean(np.abs(right - left)))
-    return total_movement < 0.001
+            xi = opinions[i]
+            xj = opinions[j]
+            opinions[i] = xi + mu * (xj - xi)
+            opinions[j] = xj + mu * (xi - xj)
 
 
 def _simulate_opinion_waves(
@@ -106,8 +99,6 @@ def _simulate_opinion_waves(
         opinions = np.clip(opinions, 0.0, 1.0)
         waves.append(opinions.copy())
 
-    if _is_degenerate_run(waves, mu):
-        return None
     return waves
 
 
@@ -157,9 +148,6 @@ def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarr
         return np.full(N_SUMMARIES, np.nan)
 
     waves = _simulate_opinion_waves(epsilon, mu, n_trials, seed)
-    if waves is None:
-        return np.full(N_SUMMARIES, np.nan)
-
     summaries = _summaries_from_waves(waves)
     if not np.all(np.isfinite(summaries)):
         return np.full(N_SUMMARIES, np.nan)

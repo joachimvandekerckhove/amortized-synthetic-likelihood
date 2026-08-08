@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from models.social.dw import (
     DW,
@@ -13,6 +14,7 @@ from models.social.dw import (
     SUMMARY_NAMES,
     TRAINING_EPSILON_BOUNDS,
     TRAINING_MU_BOUNDS,
+    _run_interactions,
     draw_cov_parameters,
     simulate_summaries,
     to_canonical,
@@ -78,9 +80,21 @@ class TestSimulator:
         assert np.all(np.isfinite(high_mu))
         assert not np.allclose(low_mu, high_mu)
 
-    def test_degenerate_returns_nan(self):
-        result = simulate_summaries(INTERIOR_PARAMS, n_trials=50, seed=99)
-        assert np.all(np.isnan(result))
+    def test_pair_update_is_simultaneous(self):
+        opinions = np.array([0.2, 0.8])
+        mu = 0.3
+        rng = np.random.default_rng(0)
+        _run_interactions(opinions, epsilon=1.0, mu=mu, n_events=1, rng=rng)
+        assert opinions[0] == pytest.approx(0.2 + mu * 0.6)
+        assert opinions[1] == pytest.approx(0.8 - mu * 0.6)
+
+    def test_pair_mean_conserved(self):
+        opinions = np.array([0.2, 0.8])
+        before = opinions.sum()
+        mu = 0.3
+        rng = np.random.default_rng(0)
+        _run_interactions(opinions, epsilon=1.0, mu=mu, n_events=1, rng=rng)
+        assert opinions.sum() == pytest.approx(before)
 
 
 class TestCanonicalTransform:
