@@ -1,7 +1,7 @@
 # Amortized synthetic likelihood — Reproduction Guide
 
-Reproducibility package for the paper *Amortized synthetic likelihoods for
-cognitive models with intractable likelihoods*. Four models are covered:
+Reproducibility package for the paper *Amortized synthetic likelihoods in
+Bayesian graphical models*. Four models are covered:
 
 | Model | Parameters | Summaries | Architecture | Epochs |
 |---|---|---|---|---|
@@ -27,8 +27,8 @@ Pipeline overrides live in `configs/dw.toml` (R=1000 replicates per draw).
 
 Each model follows the same four-stage pipeline:
 
-1. **Generate training data** — draw parameters uniformly and simulate summary
-   statistics (with replicate-based covariances) across the parameter space.
+1. **Generate training data** — draw parameters uniformly over bounded training
+   supports and simulate summary statistics (with replicate-based covariances).
 2. **Train emulator** — fit a dual-head neural network that predicts summary
    means and covariances from parameters.
 3. **Wire to JAGS** — compile the trained network into a JAGS module that
@@ -122,6 +122,7 @@ All commands run from the **repo root**.
 ### Quick start
 
 ```bash
+make preflight         # run pytest (recommended before any pipeline)
 make ddm3              # full pipeline for 3-parameter DDM
 make ddm4              # full pipeline for 4-parameter DDM
 make ddmcollapsesig    # full pipeline for collapsing-bounds DDM
@@ -130,7 +131,8 @@ make all               # all four models
 ```
 
 Training data is committed for all four models (`data/<model>/cov_train.csv`).
-To regenerate: `make -C scripts/<model> generate-data`.
+To force regeneration: `make -C scripts/<model> regenerate-data` (or
+`make -C scripts/<model> reproduce` for the full pipeline from scratch).
 
 If you already have `results/<model>/model.onnx` from a prior run, skip
 training and run only `make -C scripts/<model> wire-to-jags`.
@@ -243,9 +245,16 @@ Expected recovery (MCMC is stochastic; expect small differences across machines)
 
 ## 5. Coverage gates
 
-Each recovery study applies an automated gate: every parameter's empirical
-95% CI coverage must fall in **(0.90, 0.99)**. The pipeline exits non-zero
-if any parameter fails. All four examples pass with the default settings.
+Training-data generation applies a **parameter MI gate**: each parameter must
+carry detectable mutual information with at least one summary. Summaries with
+no associated parameter produce a warning only.
+
+Emulator training gates on **held-out validation R²** (`val_r2` in
+`final_summary.json`), default **>= 0.999** (`dw`: **>= 0.995**).
+
+Each recovery study applies automated gates: at least **98%** of subjects must
+converge, and every parameter's empirical 95% CI coverage must fall in
+**(0.90, 0.99)**. The pipeline exits non-zero if any gate fails.
 
 ## 6. Repository layout
 
@@ -257,6 +266,7 @@ Makefile                            top-level entrypoint (make ddm3, etc.)
 
 data/<model>/cov_train.csv          training data (committed)
 data/<model>/cov_settings.json      metadata: n_rep, R, seed
+data/<model>/generation_summary.json generation statistics (after regenerate)
 
 scripts/<model>/run.py              pipeline entry point
 scripts/<model>/Makefile            step targets
@@ -282,6 +292,7 @@ make -C scripts/ddm3 clean               # also removes committed training data 
 ## 8. Tests
 
 ```bash
+make preflight
 pytest
 ```
 

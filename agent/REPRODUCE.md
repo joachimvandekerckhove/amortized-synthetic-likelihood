@@ -197,7 +197,7 @@ and recovery true values use `epsilon ~ Unif(0.15, 0.35)` and
 (R=1000 replicates per parameter draw). To regenerate training data from
 scratch, run `make -C scripts/dw clean` then `make -C scripts/dw all`.
 
-Training data generation (`make -C scripts/MODEL generate-data`) is optional
+Training data generation (`make -C scripts/MODEL regenerate-data`) is optional
 when `data/MODEL/cov_train.csv` already exists. Skip it unless I ask to
 regenerate from scratch.
 
@@ -249,7 +249,7 @@ Created by `wire-to-jags` (gitignored; not in the repository). Required files:
 
 ### Training (`results/MODEL/final_summary.json`)
 
-- `overall_r2` must meet the model's training gate (default **>= 0.999** in
+- `val_r2` must meet the model's training gate (default **>= 0.999** in
   `src/asl/presets/full.toml`; `dw` overrides to **>= 0.995** in
   `configs/dw.toml`)
 - Architecture must match the table above

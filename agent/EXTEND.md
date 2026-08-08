@@ -175,7 +175,9 @@ def test_k_affects_summaries():
 ```
 
 If a parameter does not affect any summary, revise the model design. Do not
-proceed to emulator training until every parameter passes.
+proceed to emulator training until every parameter passes. The pipeline's
+`generate-data` step enforces this with a parameter-wise MI gate; summaries
+without an associated parameter produce a warning only.
 
 ## Phase 4 — Define the Model spec and register it
 
@@ -265,8 +267,9 @@ This runs generate-data (if needed) → train → wire → recovery. To regenera
 training data from scratch:
 
 ```bash
-make -C scripts/SLUG clean
-make -C scripts/SLUG all
+make -C scripts/SLUG regenerate-data
+# or full pipeline from scratch:
+make -C scripts/SLUG reproduce
 ```
 
 On failure, clean generated artifacts and retry:
@@ -286,7 +289,7 @@ Success requires **all** of the following:
 
 | Stage | Gate |
 |---|---|
-| Training | `[train] PASS` — `overall_r2` in `results/SLUG/final_summary.json` meets threshold (default **≥ 0.999**; override in `configs/SLUG.toml` if needed, as `dw` uses **≥ 0.995**) |
+| Training | `[train] PASS` — `val_r2` in `results/SLUG/final_summary.json` meets threshold (default **≥ 0.999**; override in `configs/SLUG.toml` if needed, as `dw` uses **≥ 0.995**) |
 | Recovery | `[recovery] PASS` printed |
 | Recovery | every `coverages_95ci` in **(0.90, 0.99)** |
 | Recovery | `n_converged` close to `n_attempted` (default 500) |
