@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.special import expit, logit
 
 from models.social.dw import (
     DW,
@@ -15,34 +16,41 @@ from models.social.dw import (
     TRAINING_EPSILON_BOUNDS,
     TRAINING_MU_BOUNDS,
     _run_interactions,
+    canonical_params_array,
     draw_cov_parameters,
     simulate_summaries,
     to_canonical,
 )
+from models.social.dw_bounds import (
+    LOGIT_PRIOR_EPSILON_BOUNDS,
+    LOGIT_PRIOR_MU_BOUNDS,
+    LOGIT_TRAINING_EPSILON_BOUNDS,
+    LOGIT_TRAINING_MU_BOUNDS,
+)
 
-
-INTERIOR_PARAMS = np.array([0.22, 0.20], dtype=np.float64)
+INTERIOR_CANONICAL = np.array([0.22, 0.20], dtype=np.float64)
+INTERIOR_LOGIT = np.array([logit(0.22), logit(0.20)], dtype=np.float64)
 
 
 class TestSimulator:
     def test_output_shape_and_finiteness(self):
-        result = simulate_summaries(INTERIOR_PARAMS, n_trials=8000, seed=11)
+        result = simulate_summaries(INTERIOR_LOGIT, n_trials=8000, seed=11)
         assert result.shape == (N_SUMMARIES,)
         assert np.all(np.isfinite(result))
 
     def test_seed_determinism(self):
-        a = simulate_summaries(INTERIOR_PARAMS, n_trials=8000, seed=17)
-        b = simulate_summaries(INTERIOR_PARAMS, n_trials=8000, seed=17)
+        a = simulate_summaries(INTERIOR_LOGIT, n_trials=8000, seed=17)
+        b = simulate_summaries(INTERIOR_LOGIT, n_trials=8000, seed=17)
         assert np.allclose(a, b)
 
     def test_epsilon_decreases_effective_clusters(self):
         low_eps = simulate_summaries(
-            np.array([TRAINING_EPSILON_BOUNDS[0] + 0.02, 0.20]),
+            np.array([logit(TRAINING_EPSILON_BOUNDS[0] + 0.02), INTERIOR_LOGIT[1]]),
             n_trials=12000,
             seed=23,
         )
         high_eps = simulate_summaries(
-            np.array([TRAINING_EPSILON_BOUNDS[1] - 0.02, 0.20]),
+            np.array([logit(TRAINING_EPSILON_BOUNDS[1] - 0.02), INTERIOR_LOGIT[1]]),
             n_trials=12000,
             seed=23,
         )
@@ -52,12 +60,12 @@ class TestSimulator:
 
     def test_mu_increases_large_move_fraction(self):
         low_mu = simulate_summaries(
-            np.array([0.22, TRAINING_MU_BOUNDS[0] + 0.02]),
+            np.array([INTERIOR_LOGIT[0], logit(TRAINING_MU_BOUNDS[0] + 0.02)]),
             n_trials=12000,
             seed=31,
         )
         high_mu = simulate_summaries(
-            np.array([0.22, TRAINING_MU_BOUNDS[1] - 0.02]),
+            np.array([INTERIOR_LOGIT[0], logit(TRAINING_MU_BOUNDS[1] - 0.02)]),
             n_trials=12000,
             seed=31,
         )
@@ -67,12 +75,12 @@ class TestSimulator:
 
     def test_mu_affects_temporal_summaries(self):
         low_mu = simulate_summaries(
-            np.array([0.22, TRAINING_MU_BOUNDS[0]]),
+            np.array([INTERIOR_LOGIT[0], logit(TRAINING_MU_BOUNDS[0])]),
             n_trials=12000,
             seed=37,
         )
         high_mu = simulate_summaries(
-            np.array([0.22, TRAINING_MU_BOUNDS[1] - 0.02]),
+            np.array([INTERIOR_LOGIT[0], logit(TRAINING_MU_BOUNDS[1] - 0.02)]),
             n_trials=12000,
             seed=37,
         )
@@ -98,11 +106,14 @@ class TestSimulator:
 
 
 class TestCanonicalTransform:
-    def test_to_canonical_is_identity(self):
-        params = np.array([0.22, 0.20])
-        epsilon, mu = to_canonical(params)
-        assert abs(epsilon - 0.22) < 1e-12
-        assert abs(mu - 0.20) < 1e-12
+    def test_to_canonical_applies_sigmoid(self):
+        epsilon, mu = to_canonical(INTERIOR_LOGIT)
+        assert epsilon == pytest.approx(0.22)
+        assert mu == pytest.approx(0.20)
+
+    def test_canonical_params_array_matches_expit(self):
+        batch = canonical_params_array(INTERIOR_LOGIT.reshape(1, -1))
+        np.testing.assert_allclose(batch[0], INTERIOR_CANONICAL)
 
 
 class TestModelSpec:
@@ -113,8 +124,9 @@ class TestModelSpec:
         assert DW.supports_recovery()
         assert DW.slug == "dw"
         assert DW.default_architecture == "DeepWide_32x6"
-        assert DW.param_bounds == (TRAINING_EPSILON_BOUNDS, TRAINING_MU_BOUNDS)
-        assert DW.prior_bounds == (PRIOR_EPSILON_BOUNDS, PRIOR_MU_BOUNDS)
+        assert DW.param_bounds == (LOGIT_TRAINING_EPSILON_BOUNDS, LOGIT_TRAINING_MU_BOUNDS)
+        assert DW.prior_bounds == (LOGIT_PRIOR_EPSILON_BOUNDS, LOGIT_PRIOR_MU_BOUNDS)
+        assert DW.report_param_names == ("epsilon", "mu")
         assert DW.summary_transforms == (
             "log1p",
             "log1p",
@@ -128,11 +140,18 @@ class TestModelSpec:
         rng = np.random.default_rng(0)
         for _ in range(50):
             params = draw_cov_parameters(rng)
-            assert TRAINING_EPSILON_BOUNDS[0] <= params[0] <= TRAINING_EPSILON_BOUNDS[1]
-            assert TRAINING_MU_BOUNDS[0] <= params[1] <= TRAINING_MU_BOUNDS[1]
+            assert LOGIT_TRAINING_EPSILON_BOUNDS[0] <= params[0] <= LOGIT_TRAINING_EPSILON_BOUNDS[1]
+            assert LOGIT_TRAINING_MU_BOUNDS[0] <= params[1] <= LOGIT_TRAINING_MU_BOUNDS[1]
+            epsilon, mu = to_canonical(params)
+            assert TRAINING_EPSILON_BOUNDS[0] <= epsilon <= TRAINING_EPSILON_BOUNDS[1]
+            assert TRAINING_MU_BOUNDS[0] <= mu <= TRAINING_MU_BOUNDS[1]
 
-    def test_recovery_priors_match_inference_bounds(self):
-        assert "0.15" in DW.recovery_priors["epsilon"]
-        assert "0.35" in DW.recovery_priors["epsilon"]
-        assert "0.1" in DW.recovery_priors["mu"]
-        assert "0.4" in DW.recovery_priors["mu"]
+    def test_recovery_priors_match_logit_inference_bounds(self):
+        assert f"{LOGIT_PRIOR_EPSILON_BOUNDS[0]:g}" in DW.recovery_priors["logit_epsilon"]
+        assert f"{LOGIT_PRIOR_EPSILON_BOUNDS[1]:g}" in DW.recovery_priors["logit_epsilon"]
+        assert f"{LOGIT_PRIOR_MU_BOUNDS[0]:g}" in DW.recovery_priors["logit_mu"]
+        assert f"{LOGIT_PRIOR_MU_BOUNDS[1]:g}" in DW.recovery_priors["logit_mu"]
+
+    def test_report_params_fn_is_sigmoid(self):
+        mapped = DW.report_params_fn(np.array([[0.0, 0.0]]))
+        np.testing.assert_allclose(mapped, [[0.5, 0.5]])

@@ -164,6 +164,28 @@ def compute_chain_initial_values(model: Model, rng_seed: int) -> list[dict]:
     return inits
 
 
+def recovery_reporting_arrays(
+    model: Model,
+    true_params: np.ndarray,
+    estimated_params: np.ndarray,
+    ci_lower: np.ndarray,
+    ci_upper: np.ndarray,
+    true_draw_bounds: tuple[tuple[float, float], ...] | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, tuple[str, ...], tuple[tuple[float, float], ...]]:
+    """Optionally map latent inference parameters to reported canonical scale."""
+    if model.report_params_fn is None:
+        bounds = true_draw_bounds or model.prior_bounds
+        return true_params, estimated_params, ci_lower, ci_upper, model.param_names, bounds
+
+    true_report = model.report_params_fn(true_params)
+    est_report = model.report_params_fn(estimated_params)
+    lo_report = model.report_params_fn(ci_lower)
+    hi_report = model.report_params_fn(ci_upper)
+    names = model.report_param_names or model.param_names
+    bounds = model.report_prior_bounds or true_draw_bounds or model.prior_bounds
+    return true_report, est_report, lo_report, hi_report, names, bounds
+
+
 def simulate_subject_observations(
     model: Model,
     params: np.ndarray,
@@ -283,12 +305,16 @@ def write_recovery_subjects(
     rhats: np.ndarray,
     results_dir: Path,
     true_draw_bounds: tuple[tuple[float, float], ...] | None = None,
+    *,
+    param_names: tuple[str, ...] | None = None,
+    inference_bounds: tuple[tuple[float, float], ...] | None = None,
 ) -> Path:
     """Write legacy per-subject recovery arrays for paper figure scripts."""
-    inference_bounds = model.prior_bounds
+    names = param_names or model.param_names
+    inference_bounds = inference_bounds or model.prior_bounds
     draw_bounds = true_draw_bounds or inference_bounds
     payload = {
-        "param_names": list(model.param_names),
+        "param_names": list(names),
         "param_bounds": [list(bounds) for bounds in inference_bounds],
         "true_draw_bounds": [list(bounds) for bounds in draw_bounds],
         "true": true_params.tolist(),
@@ -396,17 +422,30 @@ def run_recovery_study(model: Model) -> None:
     ci_upper_arr = np.array(ci_upper_list)
     rhat_arr = np.array(rhat_list)
 
+    (
+        true_report,
+        est_report,
+        ci_lo_report,
+        ci_hi_report,
+        report_names,
+        report_draw_bounds,
+    ) = recovery_reporting_arrays(
+        model, true_params_arr, est_params_arr, ci_lower_arr, ci_upper_arr, true_draw_bounds
+    )
+
     results_dir = Path("results") / slug
     results_dir.mkdir(parents=True, exist_ok=True)
     subjects_path = write_recovery_subjects(
         model,
-        true_params_arr,
-        est_params_arr,
-        ci_lower_arr,
-        ci_upper_arr,
+        true_report,
+        est_report,
+        ci_lo_report,
+        ci_hi_report,
         rhat_arr,
         results_dir,
-        true_draw_bounds=true_draw_bounds,
+        true_draw_bounds=report_draw_bounds,
+        param_names=report_names,
+        inference_bounds=report_draw_bounds,
     )
     print(f"[recovery] Per-subject arrays: {subjects_path}")
 
@@ -414,26 +453,28 @@ def run_recovery_study(model: Model) -> None:
     figures_dir.mkdir(parents=True, exist_ok=True)
     plot_recovery_diagnostics(
         model=model,
-        true_params=true_params_arr,
-        estimated_params=est_params_arr,
-        ci_lower=ci_lower_arr,
-        ci_upper=ci_upper_arr,
+        true_params=true_report,
+        estimated_params=est_report,
+        ci_lower=ci_lo_report,
+        ci_upper=ci_hi_report,
         output_path=figures_dir / "recovery.pdf",
+        param_names=report_names,
     )
     print(f"[recovery] Recovery plot: {figures_dir / 'recovery.pdf'}")
 
+    n_report = len(report_names)
     correlations = [
-        float(np.corrcoef(true_params_arr[:, i], est_params_arr[:, i])[0, 1])
-        for i in range(model.n_params)
+        float(np.corrcoef(true_report[:, i], est_report[:, i])[0, 1])
+        for i in range(n_report)
     ]
     coverages = [
         float(
             np.mean(
-                (true_params_arr[:, i] >= ci_lower_arr[:, i])
-                & (true_params_arr[:, i] <= ci_upper_arr[:, i])
+                (true_report[:, i] >= ci_lo_report[:, i])
+                & (true_report[:, i] <= ci_hi_report[:, i])
             )
         )
-        for i in range(model.n_params)
+        for i in range(n_report)
     ]
 
     summary = {
@@ -442,8 +483,8 @@ def run_recovery_study(model: Model) -> None:
         "n_failed": n_failed,
         "failure_counts": failure_counts,
         "recovery_time_seconds": recovery_time_seconds,
-        "correlations": dict(zip(model.param_names, correlations)),
-        "coverages_95ci": dict(zip(model.param_names, coverages)),
+        "correlations": dict(zip(report_names, correlations)),
+        "coverages_95ci": dict(zip(report_names, coverages)),
         "mean_rhat": dict(zip(model.param_names, np.mean(rhat_list, axis=0).tolist())),
     }
 
@@ -454,7 +495,7 @@ def run_recovery_study(model: Model) -> None:
 
     print(f"[recovery] Summary: {summary}")
 
-    check_coverage_gate(coverages, model.param_names)
+    check_coverage_gate(coverages, report_names)
 
     print(
         f"[recovery] PASS: {len(true_params_list)} subjects recovered successfully"

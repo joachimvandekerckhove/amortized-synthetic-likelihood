@@ -18,9 +18,11 @@ natural showcase for the ASL approach.
 The `dw` model implements bounded-confidence opinion dynamics (Deffuant--Weisbuch):
 agents with opinions in `[0, 1]` interact pairwise and move toward each other
 when their opinions differ by less than epsilon. Parameters are inferred on the
-canonical scale: training draws use
-epsilon in `[0.125, 0.375]` and mu in `[0.075, 0.425]`; JAGS priors and
-recovery true values use epsilon in `[0.15, 0.35]` and mu in `[0.1, 0.4]`.
+logit scale and mapped to canonical epsilon and mu in `(0, 1)` via the logistic
+sigmoid. Training draws are uniform on the logit image of epsilon in
+`[0.125, 0.375]` and mu in `[0.075, 0.425]`; JAGS priors and recovery true
+values use the logit image of epsilon in `[0.15, 0.35]` and mu in `[0.1, 0.4]`.
+Recovery metrics are reported on the canonical scale.
 Pipeline overrides live in `configs/dw.toml` (R=1000 replicates per draw).
 
 ## How it works
@@ -240,12 +242,11 @@ Expected recovery (MCMC is stochastic; expect small differences across machines)
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
-| epsilon | 0.980 | 0.84 |
-| mu | 0.964 | 0.84 |
+| epsilon | (rerun pending) | (rerun pending) |
+| mu | (rerun pending) | (rerun pending) |
 
-Note: after regenerating training data with the simultaneous pair-update fix,
-recovery correlations remain high but 95% CI coverage currently falls below
-the 90% gate (under-coverage). This is under investigation.
+Recovery infers logit-scale parameters and reports coverage on canonical
+epsilon and mu after the logistic sigmoid map.
 
 ## 5. Coverage gates
 

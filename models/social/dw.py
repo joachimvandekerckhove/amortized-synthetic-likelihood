@@ -1,30 +1,37 @@
 """
 Deffuant-Weisbuch bounded-confidence opinion dynamics for ASL.
 
-Parameters are inferred on the canonical scale: epsilon (confidence bound)
-and mu (compromise rate). Training draws are uniform on slightly wider
-supports than the JAGS priors and recovery true-parameter distribution.
+Inference uses logit-scale parameters mapped to the canonical (0, 1) range via
+the logistic sigmoid. Training and prior support are specified as canonical
+intervals in dw_bounds and converted to logit bounds; the transform itself does
+not bake in any affine limits.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from scipy.special import expit
 
 from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
 from models.social.dw_bounds import (
+    CANONICAL_PARAM_NAMES,
+    DW_LOGIT_PRIOR_BOUNDS,
+    DW_LOGIT_TRAINING_BOUNDS,
     DW_PRIOR_BOUNDS,
     DW_RECOVERY_PRIORS,
     DW_TRAINING_BOUNDS,
+    LOGIT_TRAINING_EPSILON_BOUNDS,
+    LOGIT_TRAINING_MU_BOUNDS,
     PRIOR_EPSILON_BOUNDS,
     PRIOR_MU_BOUNDS,
     TRAINING_EPSILON_BOUNDS,
     TRAINING_MU_BOUNDS,
 )
 
-PARAM_NAMES = ("epsilon", "mu")
-PARAM_BOUNDS = DW_TRAINING_BOUNDS
-PRIOR_PARAM_BOUNDS = DW_PRIOR_BOUNDS
+PARAM_NAMES = ("logit_epsilon", "logit_mu")
+PARAM_BOUNDS = DW_LOGIT_TRAINING_BOUNDS
+PRIOR_PARAM_BOUNDS = DW_LOGIT_PRIOR_BOUNDS
 
 SUMMARY_NAMES = (
     "effective_clusters_final",
@@ -127,23 +134,30 @@ def _summaries_from_waves(waves: list[np.ndarray]) -> np.ndarray:
     )
 
 
+def to_canonical(params: np.ndarray) -> tuple[float, float]:
+    """Map logit parameters to canonical epsilon and mu in (0, 1)."""
+    canonical = canonical_params_array(np.asarray(params, dtype=np.float64).reshape(1, -1))
+    return float(canonical[0, 0]), float(canonical[0, 1])
+
+
+def canonical_params_array(params: np.ndarray) -> np.ndarray:
+    """Vectorized sigmoid map from logit inputs to canonical parameters."""
+    return expit(np.asarray(params, dtype=np.float64))
+
+
 def draw_cov_parameters(rng: np.random.Generator) -> np.ndarray:
-    """Uniform draws on the canonical training support."""
+    """Uniform draws on the logit training support."""
     return np.array(
         [
-            rng.uniform(*TRAINING_EPSILON_BOUNDS),
-            rng.uniform(*TRAINING_MU_BOUNDS),
+            rng.uniform(*LOGIT_TRAINING_EPSILON_BOUNDS),
+            rng.uniform(*LOGIT_TRAINING_MU_BOUNDS),
         ],
         dtype=np.float64,
     )
 
 
-def to_canonical(params: np.ndarray) -> tuple[float, float]:
-    return float(params[0]), float(params[1])
-
-
 def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
-    epsilon, mu = map(float, params)
+    epsilon, mu = to_canonical(params)
     if n_trials < N_AGENTS:
         return np.full(N_SUMMARIES, np.nan)
 
@@ -175,4 +189,7 @@ DW = Model(
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
     default_architecture="DeepWide_32x6",
+    report_param_names=CANONICAL_PARAM_NAMES,
+    report_params_fn=canonical_params_array,
+    report_prior_bounds=DW_PRIOR_BOUNDS,
 )

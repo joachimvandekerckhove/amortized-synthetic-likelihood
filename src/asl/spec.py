@@ -42,6 +42,9 @@ class Model:
     build_jags_likelihood: JagsLinesFn | None = None
     emulator_output_names: tuple[str, ...] | None = None
     default_architecture: str | None = None
+    report_param_names: tuple[str, ...] | None = None
+    report_params_fn: Callable[[np.ndarray], np.ndarray] | None = None
+    report_prior_bounds: tuple[tuple[float, float], ...] | None = None
 
     def __post_init__(self) -> None:
         if len(self.prior_bounds) != len(self.param_names):
@@ -59,6 +62,25 @@ class Model:
         if invalid:
             raise ValueError(
                 f"Model '{self.slug}': invalid summary_transforms {invalid}"
+            )
+        if (self.report_params_fn is None) ^ (self.report_param_names is None):
+            raise ValueError(
+                f"Model '{self.slug}': report_params_fn and report_param_names "
+                "must both be set or both omitted."
+            )
+        if self.report_param_names is not None and len(self.report_param_names) != len(
+            self.param_names
+        ):
+            raise ValueError(
+                f"Model '{self.slug}': report_param_names length "
+                f"{len(self.report_param_names)} != n_params {len(self.param_names)}"
+            )
+        if self.report_prior_bounds is not None and len(self.report_prior_bounds) != len(
+            self.param_names
+        ):
+            raise ValueError(
+                f"Model '{self.slug}': report_prior_bounds length "
+                f"{len(self.report_prior_bounds)} != n_params {len(self.param_names)}"
             )
 
     @property
