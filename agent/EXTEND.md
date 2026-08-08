@@ -1,100 +1,142 @@
-## The process
+---
+name: extend-asl-companion
+description: >-
+  Install the amortized synthetic likelihood companion repository and implement
+  a new generative model end-to-end (simulator, Model spec, pipeline, tests,
+  full train/wire/recovery). Use when an external user asks to add a model to
+  this repo or extend the ASL framework with a new example.
+---
 
-**Here the user describes the generative process in as much detail as possible.**
+# Extend the ASL companion repository with a new model
 
-## Goal
+You are an AI coding agent invoked on behalf of an **external user** who does
+not know this codebase. They will describe a generative cognitive or statistical
+model in plain language. Your job is to:
 
-Implement a new model **SLUG** end to end:
+1. Install and verify this repository on their machine.
+2. Elicit any missing specification details in simple terms.
+3. Implement the model following existing conventions exactly.
+4. Run the full four-stage pipeline and report pass/fail gate results.
 
-1. using the process information, define parameters, bounds, and summary statistics
-2. implement a stochastic simulator: `(params, n_trials, seed) -> summaries`
-3. define a `Model` spec with JAGS synthetic-likelihood hooks and register it in `models/catalog.py`
-4. add a `scripts/SLUG/` pipeline (Makefile + run.py)
-5. add unit tests, including **parameter-sensitivity checks for every summary**
-6. run the full pipeline and confirm all gates pass
+**Run commands yourself.** Do not only list instructions for the user to follow
+unless a step genuinely requires their credentials or physical action (e.g.
+`sudo apt install`).
 
-Success means:
+Do not refactor unrelated code. Do not edit `src/asl/presets/full.toml`.
+Do not commit or push unless the user explicitly asks.
 
-- `pytest` passes (including your new tests)
-- full pipeline completes with `[train] PASS` (R² >= threshold) and
-  `[recovery] PASS` (all coverages in **(0.90, 0.99)**)
+## When to use this skill
 
-## Required reading (in order)
+Use this skill when:
 
-Study these existing models as templates (simplest to more complex):
+- The user wants a **new model slug** added to this repository.
+- They have (or will provide) parameters, summary statistics, and a simulator.
+- They expect the same workflow as the shipped examples (`ddm3`, `ddm4`,
+  `ddmcollapsesig`, `dw`).
 
-1. `models/ddm/ddm3.py` — three summaries, three params
-2. `models/ddm/ddmcollapsesig.py` — four summaries, four params
-3. `models/social/dw.py` — non-RT summaries, custom training draws, prior bounds
-4. `src/asl/spec.py` — `Model` dataclass contract
-5. `src/asl/data.py` — per-summary transforms via `Model.summary_transforms`
-6. `src/asl/cholesky.py` — `build_sl_likelihood_line`, `emulator_output_names_for`
-7. `scripts/ddm3/run.py` and `scripts/ddm3/Makefile` — pipeline wiring
-8. `tests/test_ddmcollapsesig.py` — sensitivity and model-spec tests
-9. `agent/REPRODUCE.md` — environment setup and gate definitions
+**Stop and use `agent/REPRODUCE.md` instead** if the user only wants to re-run
+an existing model.
 
-Do **not** edit `src/asl/presets/full.toml` unless I explicitly ask. Override
-hyperparameters in `asl.toml` or via `ASL_CONFIG` instead.
+## How to work with a naive external user
 
-## Repository layout for a new model
+The user may not know repository jargon. Translate between their language and
+implementation choices:
 
-Add files (choose informative <family> paths if your model is not a DDM variant):
-
-```
-models/<family>/<slug>.py           # simulator + Model spec
-scripts/SLUG/run.py                 # four-step dispatcher
-scripts/SLUG/Makefile               # make targets
-tests/test_<slug>.py                # simulator + spec tests
-data/SLUG/cov_train.csv             # committed training data (after full run)
-```
-
-Generated at runtime (gitignored):
-
-```
-data/SLUG/cov_train.csv
-results/SLUG/model.onnx
-results/SLUG/final_summary.json
-results/SLUG/recovery_summary.json
-results/SLUG/recovery_subjects.json
-models/SLUG.jnnx/
-  obs_transform.json                  raw-summary transforms (JNNX v2; written by wire-to-jags)
-figures/SLUG/recovery.pdf             2-column paper-style recovery multipanel
-```
-
-## Step 1: Specify the generative model
-
-Before writing code, write down (in comments or a brief design note):
-
-| Item | Your choice |
+| They might say | You need to determine |
 |---|---|
-| Parameters | names, meanings, bounds |
-| Summary statistics | names, definitions, which are proportions vs RT-based |
-| Fixed constants | anything not inferred (e.g. fixed bias, known stimulus set) |
-| Architecture | `DeepWide_24x4` (<= 3 params, <= 3 summaries) or `DeepWide_32x6` (larger) |
+| "fit my model" | Parameter names, bounds, summaries, trial structure |
+| "recovery study" | `confirm-recovery` stage (500 synthetic subjects by default) |
+| "train the network" | `train-emulator` stage |
+| "hook it into JAGS/Bayesian inference" | `wire-to-jags` stage |
 
-Rules from the existing codebase:
+**Before editing any file:**
 
-- **Parameter bounds** must keep the simulator numerically stable (avoid
-  degenerate trials where almost no paths absorb, or summaries are always NaN).
-- **Training vs prior bounds**: set `param_bounds` for emulator training / cov_data
-  draws and `prior_bounds` for recovery subject draws (required on every model).
-- **Summary transforms**: set `summary_transforms` explicitly (`"identity"` or
-  `"log1p"`) — one entry per `summary_names` column.
-- **Order matters**: `param_names`, `param_bounds`, and the `params` array passed
-  to `simulate_summaries` must use the same order everywhere.
+1. Restate the model in your own words (parameters, summaries, simulator).
+2. Propose `SLUG`, architecture (`DeepWide_24x4` vs `DeepWide_32x6`), and
+   which existing example to copy (`ddm3`, `ddmcollapsesig`, or `dw`).
+3. Ask clarifying questions if bounds, summary definitions, or transforms are
+   ambiguous.
+4. Wait for user approval of the plan.
 
-Create a plan from these instructions, then obtain user approval before proceeding.
+Use short, non-technical status updates while long pipeline stages run.
 
-## Step 2: Implement the simulator
+## Phase 0 — Lock the specification
 
-Create `models/<family>/<slug_base>.py` with at minimum:
+Obtain and record:
+
+| Item | What you need |
+|---|---|
+| **SLUG** | Short lowercase identifier (e.g. `mytask`). Used in paths and JAGS. |
+| **Parameters** | Names, meanings, training bounds, inference/prior bounds. |
+| **Summaries** | Names, definitions, count, which need `log1p` vs `identity`. |
+| **Simulator** | How `(params, n_trials, seed)` produces one summary vector. |
+| **Architecture** | `DeepWide_24x4` if ≤3 params and ≤3 summaries; else `DeepWide_32x6`. |
+
+Read these templates in the repository before writing code (do not guess APIs):
+
+1. `models/ddm/ddm3.py` — minimal three-parameter example
+2. `models/ddm/ddmcollapsesig.py` — four parameters, non-trivial simulator
+3. `models/social/dw.py` + `models/social/dw_bounds.py` — custom training
+   draws, separate training vs prior bounds
+4. `src/asl/spec.py` — `Model` dataclass contract
+5. `scripts/ddm3/run.py` and `scripts/ddm3/Makefile` — pipeline wiring
+6. `tests/test_ddmcollapsesig.py` — parameter-sensitivity tests
+
+## Phase 1 — Install and verify the environment
+
+Run on the user's machine from a clean shell. Use their fork URL if they
+provide one.
+
+```bash
+git clone https://github.com/joachimvandekerckhove/amortized-synthetic-likelihood.git
+cd amortized-synthetic-likelihood
+
+# System packages (Debian/Ubuntu example)
+sudo apt install jags pkg-config g++ make
+
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[jags,dev]"
+```
+
+Optional GPU training (Pascal / sm_61, e.g. GTX 1080 Ti):
+
+```bash
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126
+```
+
+Verify before implementing anything new:
+
+```bash
+python -c "import asl; import jnnx; print('OK')"
+pytest
+```
+
+Both commands must succeed. Python **3.11+** is required (`tomllib` in stdlib).
+
+ONNX Runtime for JAGS module compilation downloads automatically on the first
+`wire-to-jags` step into `vendor/`. Optional prefetch:
+
+```bash
+make bootstrap-ort
+```
+
+Optional user overrides: `asl.toml` at the repo root, or `configs/<slug>.toml`
+merged via `ASL_CONFIG` (see `configs/dw.toml`).
+
+## Phase 2 — Implement the simulator
+
+Create `models/<family>/<slug>.py`.
+
+Minimum exports:
 
 ```python
 PARAM_NAMES = ("...", ...)
-PARAM_BOUNDS = ((lo, hi), ...)
+PARAM_BOUNDS = ((lo, hi), ...)          # training / emulator support
+PRIOR_PARAM_BOUNDS = ((lo, hi), ...)    # recovery + JAGS priors (may equal PARAM_BOUNDS)
 SUMMARY_NAMES = ("...", ...)
 N_SUMMARIES = len(SUMMARY_NAMES)
-RECOVERY_PRIORS = {"param": "param ~ dunif(lo, hi)", ...}
+SUMMARY_TRANSFORMS = ("log1p", ..., "identity")  # one per summary
 
 def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
     ...
@@ -102,64 +144,48 @@ def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarr
 
 Contract for `simulate_summaries`:
 
-- **Input**: `params` shape `(n_params,)`, `n_trials >= 1`, integer `seed`
-- **Output**: 1-D float array of length `N_SUMMARIES`
-- **Deterministic given seed**: same `(params, n_trials, seed)` -> same output
-- **NaN on failure**: return `np.full(N_SUMMARIES, np.nan)` when summaries are
-  undefined (too few valid trials, division by zero, etc.). The training-data
-  generator drops these rows silently.
-- **No side effects**: do not write files or depend on global mutable state
+- **Input:** `params` shape `(n_params,)`, `n_trials >= 1`, integer `seed`
+- **Output:** 1-D `float64` array of length `N_SUMMARIES`
+- **Deterministic:** same `(params, n_trials, seed)` → same output
+- **Failure:** return `np.full(N_SUMMARIES, np.nan)` when undefined; training
+  data generation drops these rows
+- **No side effects:** no file I/O or global mutable state
 
-Reuse existing simulators where possible (`models/ddm/simulator.py`, etc.)
-rather than reimplementing from scratch.
+Reuse existing simulators (`models/ddm/simulator.py`, etc.) when applicable.
 
-## Step 3: Confirm summary statistics are sensitive to parameters
+If training draws need a distribution other than uniform on `param_bounds`, set
+`draw_cov_parameters` on the `Model` (see `models/social/dw.py`).
 
-**This step is mandatory before training.** An emulator cannot support inference
-if summaries do not change when a parameter changes.
+## Phase 3 — Prove every parameter moves at least one summary
 
-For **each parameter** `p_j`, write at least one test that:
+**Mandatory before training.** For **each** parameter `p_j`, add a test that:
 
-1. fixes all other parameters at interior values (not on bounds)
-2. draws two values of `p_j` that differ substantially (low vs high within bounds)
-3. uses the **same seed** and a large enough `n_trials` (typically ~2000)
-4. asserts at least one summary differs meaningfully between the two runs
-
-Example pattern (from `tests/test_ddmcollapsesig.py`):
+1. fixes other parameters at interior values
+2. uses two substantially different values of `p_j` within bounds
+3. uses the **same** `seed` and large `n_trials` (typically ~2000)
+4. asserts summaries are finite and not all equal
 
 ```python
-def test_k_affects_rt_median():
-    params_low_k = np.array([1.2, 0.2, 0.1, 0.2])
-    params_high_k = np.array([1.2, 0.2, 8.0, 0.2])
-    low = simulate_summaries(params_low_k, n_trials=2000, seed=23)
-    high = simulate_summaries(params_high_k, n_trials=2000, seed=23)
+def test_k_affects_summaries():
+    low = simulate_summaries(params_low, n_trials=2000, seed=23)
+    high = simulate_summaries(params_high, n_trials=2000, seed=23)
     assert np.all(np.isfinite(low))
     assert np.all(np.isfinite(high))
-    assert not np.allclose(low, high)          # at least one summary differs
-    assert high[3] < low[3]                    # optional: directional check
+    assert not np.allclose(low, high)
 ```
 
-Also test:
+If a parameter does not affect any summary, revise the model design. Do not
+proceed to emulator training until every parameter passes.
 
-- output length matches `SUMMARY_NAMES`
-- finite summaries for a typical interior parameter vector
-- edge cases you care about (e.g. a parameter at its lower bound if valid)
+## Phase 4 — Define the Model spec and register it
 
-If a parameter does not move any summary, either **remove it from the model** or
-**choose different summaries**. Do not proceed to training until every
-parameter has demonstrated sensitivity.
-
-Document which summary indices respond to which parameters in test docstrings.
-
-## Step 4: Define the Model spec
-
-In `models/<family>/<slug>.py` (or extend the simulator file from Step 2), add the
-`Model` instance. Follow `models/ddm/ddm3.py` or `models/social/dw.py`:
+In the same module, add JAGS hooks and the `Model` instance:
 
 ```python
 from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
-# import simulator constants and simulate_summaries from the same module
+
+RECOVERY_PRIORS = {"param": "param ~ dunif(lo, hi)", ...}
 
 def build_jags_likelihood(obs: dict) -> list[str]:
     del obs
@@ -169,59 +195,56 @@ SLUG_MODEL = Model(
     slug="SLUG",
     param_names=PARAM_NAMES,
     param_bounds=PARAM_BOUNDS,
-    prior_bounds=PRIOR_BOUNDS,
+    prior_bounds=PRIOR_PARAM_BOUNDS,
     summary_names=SUMMARY_NAMES,
     summary_transforms=SUMMARY_TRANSFORMS,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
-    default_architecture="DeepWide_32x6",   # or DeepWide_24x4
+    default_architecture="DeepWide_32x6",
 )
 ```
 
-If training draws need a different distribution than uniform `param_bounds`, set
-`draw_cov_parameters` (see `models/social/dw.py`). `prior_bounds` is required
-on every model.
-
-Register the model in `models/catalog.py` (`get_model` lookup).
+Register in `models/catalog.py` inside `get_model()`.
 
 Checklist:
 
-- `slug` matches directory names in `data/`, `results/`, `scripts/`
-- `emulator_output_names` is set (required for multivariate / SL path)
-- `build_jags_likelihood` returns one line: `obs[1:p] ~ SLUG_sl(...)` (raw
-  summaries; JNNX applies transforms from `obs_transform.json` at compile time)
-- `wire-to-jags` must succeed and produce `models/SLUG.jnnx/obs_transform.json`
-- `recovery_priors` use JAGS syntax consistent with inference bounds
-- `supports_recovery()` is True (automatic when hooks are set)
-- `n_outputs == n_summaries + n_summaries * (n_summaries + 1) // 2` (mu + chol)
+- `slug` matches `data/SLUG/`, `results/SLUG/`, `scripts/SLUG/`
+- `build_jags_likelihood` returns `obs[1:p] ~ SLUG_sl(...)` via
+  `build_sl_likelihood_line`
+- `prior_bounds` is set on every model
+- `n_outputs == n_summaries + n_summaries * (n_summaries + 1) // 2`
 
-## Step 5: Add the pipeline script and Makefile
+## Phase 5 — Add the pipeline
 
-Copy `scripts/ddm3/run.py` to `scripts/SLUG/run.py`. Change the imported
-`Model` constant (keep lazy step imports).
+Copy and adapt:
 
-Copy `scripts/ddm3/Makefile` to `scripts/SLUG/Makefile`. Change:
+- `scripts/ddm3/run.py` → `scripts/SLUG/run.py` (change imported `Model`)
+- `scripts/ddm3/Makefile` → `scripts/SLUG/Makefile` (set `MODEL := SLUG`)
 
-- `MODEL := SLUG`
+The four Makefile targets are fixed:
 
-For a paper example, also add `make SLUG` to the root `Makefile` (see `dw`).
+1. `generate-data`
+2. `train-emulator`
+3. `wire-to-jags`
+4. `confirm-recovery`
 
-The four steps are fixed: `generate-data`, `train-emulator`, `wire-to-jags`,
-`confirm-recovery`. Do not add extra CLI modes.
+Plus `clean` and `clean-generated` only. Do not add other targets.
 
-## Step 6: Add unit tests
+Add `make SLUG` to the root `Makefile` if this is a paper example (see `dw`).
 
-Create `tests/test_<slug>.py` with at least:
+If the model needs non-default hyperparameters, add `configs/SLUG.toml` and set
+`ASL_CONFIG` in the model Makefile (see `configs/dw.toml`).
 
-1. **Sensitivity tests** (Step 3) — one per parameter
-2. **Model spec tests** — `param_names`, `summary_names`, `slug`, `n_outputs`,
-   `supports_recovery()`
-3. **Catalog** — `get_model("SLUG")` returns your `Model` (see `tests/test_catalog.py`)
-4. **Simulator sanity** — finite output for typical params, correct length
+## Phase 6 — Add unit tests
 
-Run:
+Create `tests/test_<slug>.py` with:
+
+1. sensitivity tests (Phase 3) — one per parameter
+2. model spec tests — names, `slug`, `n_outputs`, `supports_recovery()`
+3. catalog test — `get_model("SLUG")` returns your model
+4. simulator sanity — shape, finiteness for typical params
 
 ```bash
 pytest tests/test_<slug>.py -v
@@ -230,109 +253,86 @@ pytest
 
 All tests must pass before running the pipeline.
 
-## Step 7: Environment and configuration
+## Phase 7 — Run the full pipeline
 
-Follow `agent/REPRODUCE.md` for system packages, Python venv, and ONNX Runtime.
-
-`asl.toml` is optional for most runs. Override hyperparameters there or via
-`ASL_CONFIG` (see README).
-
-```toml
-[wire]
-onnxruntime_dir = "/absolute/path/to/onnxruntime"  # optional
-```
-
-Optional overrides for development:
-
-```toml
-[training]
-architecture = "DeepWide_32x6"
-
-[cov_data]
-parallel_workers = 8
-
-[recovery]
-parallel_workers = 4
-```
-
-## Step 8: Run the pipeline
-
-From the repo root:
+From the repository root:
 
 ```bash
 make -C scripts/SLUG all
 ```
 
-For a quicker recovery check during development, layer a smaller override:
+This runs generate-data (if needed) → train → wire → recovery. To regenerate
+training data from scratch:
 
 ```bash
-ASL_CONFIG=configs/recovery_highn.toml make -C scripts/SLUG confirm-recovery
+make -C scripts/SLUG clean
+make -C scripts/SLUG all
 ```
 
-(Customize a config file with fewer subjects or trials as needed.)
+On failure, clean generated artifacts and retry:
 
-Verify:
+```bash
+make -C scripts/SLUG clean-generated
+```
 
-- `data/SLUG/cov_train.csv` created (or committed data present)
-- `results/SLUG/final_summary.json` — R² >= 0.999 in `final_summary.json`
-- `results/SLUG/recovery_summary.json` — pipeline prints `[recovery] PASS`
-- `results/SLUG/recovery_subjects.json` — per-subject arrays for paper figures
+Do not skip `wire-to-jags`. Recovery requires the compiled JAGS module.
 
-If training fails, fix the simulator or summaries before a full rerun. Common
-causes: too many NaN rows in training data, summaries not sensitive to params,
-bounds too wide, or architecture too small for the parameter count.
+Tell the user when each stage starts and when it finishes. Pipeline stages can
+take hours on CPU.
 
-## Step 9: Gates
+## Phase 8 — Verify automated gates
 
-Paper-scale defaults: 20,000 parameter draws, 10,000 training epochs, 500
-recovery subjects x 500 trials. Wall time depends on hardware (see README
-reference machine).
-
-Gates (same as `agent/REPRODUCE.md`):
+Success requires **all** of the following:
 
 | Stage | Gate |
 |---|---|
-| Training | `overall_r2 >= 0.999` in `final_summary.json` |
-| Recovery | every `coverages_95ci` value in **(0.90, 0.99)** |
-| Recovery | `n_converged` close to `n_attempted` (500) |
+| Training | `[train] PASS` — `overall_r2` in `results/SLUG/final_summary.json` meets threshold (default **≥ 0.999**; override in `configs/SLUG.toml` if needed, as `dw` uses **≥ 0.995**) |
+| Recovery | `[recovery] PASS` printed |
+| Recovery | every `coverages_95ci` in **(0.90, 0.99)** |
+| Recovery | `n_converged` close to `n_attempted` (default 500) |
 | Recovery | all `mean_rhat` < 1.01 |
 
-Report the contents of `final_summary.json` and `recovery_summary.json`.
+Report `final_summary.json` and `recovery_summary.json` to the user in plain
+language (what passed, what failed, and what it means).
 
-## Step 10: Optional — commit training data
+Paper-scale defaults (`src/asl/presets/full.toml`): 20,000 parameter draws,
+25,000 training epochs (20,000 for `dw`), 500 recovery subjects.
 
-If I ask you to commit artifacts, follow the pattern of existing models:
+## Phase 9 — Commit training data (only if asked)
+
+If the user asks to commit artifacts:
 
 - commit `data/SLUG/cov_train.csv` and `data/SLUG/cov_settings.json`
-- do **not** commit `results/`, `figures/`, or `models/*.jnnx/` (gitignored) unless
-  instructed otherwise
+- do **not** commit `results/`, `figures/`, or `models/*.jnnx/` (gitignored)
 
-## What not to do
-
-- Do not add a second emulator for the same parameter vector (one SL node per model)
-- Do not add top-level CLI entrypoints beyond `scripts/SLUG/run.py`
-- Do not modify core `asl` library code unless a hook is genuinely missing, and in
-  that case backwards compatibility is inviolable
-- Do not skip parameter-sensitivity tests
-- Do not commit or push unless I explicitly ask
-
-## If something fails
+## Troubleshooting
 
 | Symptom | Likely cause | Action |
 |---|---|---|
-| Many invalid rows in `generate-data` | simulator returns NaN too often | tighten bounds; increase `trials_per_replicate` via `asl.toml` |
-| Training R² below threshold | insensitive summaries; wrong transforms; too few rows | rerun Step 3; check summary names; try larger architecture |
-| Recovery coverage too low | emulator bias; poor chain mixing | check `wire-to-jags` succeeded; inspect `figures/SLUG/recovery.pdf` |
-| Recovery coverage too high | overdispersed emulator; SL miswired | confirm `build_sl_likelihood_line` slug matches JNNX package name |
-| `wire-to-jags` fails | missing ONNX Runtime or g++ | set `onnxruntime_dir`; install build tools |
-| Parameter not recovered | summary not sensitive to that param | return to Step 3; add or replace summaries |
+| Many invalid rows in `generate-data` | simulator returns NaN too often | tighten bounds; increase `trials_per_replicate` in config |
+| Training R² below threshold | insensitive summaries; wrong transforms | redo Phase 3; check `summary_transforms`; try larger architecture |
+| `wire-to-jags` fails | missing `pkg-config`, g++, or ONNX Runtime | install build tools; run `make bootstrap-ort` |
+| Recovery coverage out of range | emulator bias; wiring error | confirm `wire-to-jags` succeeded; inspect `figures/SLUG/recovery.pdf` |
+| Parameter not recovered | summary insensitive to that param | redo Phase 3; revise summaries |
+
+## Forbidden actions
+
+- Do not add smoke-test configs, abbreviated pipelines, diagnostic-only scripts,
+  or Makefile targets beyond the four pipeline steps plus `clean` /
+  `clean-generated`.
+- Do not add a second synthetic-likelihood node for the same parameter vector.
+- Do not add top-level CLI entrypoints beyond `scripts/SLUG/run.py`.
+- Do not modify core `asl` library code unless a hook is genuinely missing; if
+  you must, preserve backward compatibility for existing models.
+- Do not skip parameter-sensitivity tests.
+- Do not commit or push unless the user explicitly asks.
 
 ## Deliverables
 
-When finished, report:
+When finished, report to the user:
 
-1. file list created or modified
-2. parameter -> summary sensitivity map (from tests)
-3. gate results (JSON summaries from training and recovery)
-4. total wall time per stage
-5. anything that required deviation from this checklist
+1. Files created or modified
+2. Parameter → summary sensitivity map (from tests)
+3. `final_summary.json` and `recovery_summary.json` gate results
+4. Approximate wall time per pipeline stage
+5. Any deviation from this checklist and why

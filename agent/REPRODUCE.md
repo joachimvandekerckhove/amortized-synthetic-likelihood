@@ -116,7 +116,7 @@ criteria are the same.
 
 | Command | Result on tested platform |
 |---|---|
-| `pytest` | 80 tests passed |
+| `pytest` | 105 tests passed |
 | `make all` | all four models: train + wire + recovery **PASS** |
 
 ### Observed wall time (`make all`)
@@ -128,8 +128,8 @@ Recovery dominated total runtime. On the hardware above:
 | `ddm3` | 30 minutes |
 | `ddm4` | 1 hour |
 | `ddmcollapsesig` | 2 hours |
-| `dw` | 35 minutes |
-| **Total** | about 5 hours |
+| `dw` | about 5.5 hours |
+| **Total** | about 9 hours |
 
 Report your own OS, Python, and GPU when filing issues or reproduction reports.
 
@@ -142,10 +142,8 @@ Container image: `python:3.11-slim-bookworm` (Debian 12).
 | Stage | Result | Notes |
 |---|---|---|
 | `pip install -e ".[jags,dev]"` | pass | no extra steps |
-| `pytest` | pass | 80 tests |
-| `train-emulator` (ddm3, 50 epochs via `ASL_CONFIG`, CPU) | pass | ~3 s training |
+| `pytest` | pass | 105 tests |
 | `wire-to-jags` | pass with `pkg-config` | without it: clear error from wire preflight |
-| `confirm-recovery` (5 subjects, no manual `LD_LIBRARY_PATH`) | pass through summary | 5/5 converged; coverage gate fails on smoke training (expected) |
 
 **Ubuntu 22.04 default Python (3.10):** `pytest` fails immediately with
 `ModuleNotFoundError: No module named 'tomllib'`. Use Python 3.11+ (e.g.
@@ -191,6 +189,13 @@ Rules:
 | `ddm4` | DeepWide_32x6 | yes (`data/ddm4/`) |
 | `ddmcollapsesig` | DeepWide_32x6 | yes (`data/ddmcollapsesig/`) |
 | `dw` | DeepWide_32x6 | yes (`data/dw/`) |
+
+**`dw` parameterization (canonical uniform).** Training draws use
+`epsilon ~ Unif(0.125, 0.375)` and `mu ~ Unif(0.075, 0.425)`; JAGS priors
+and recovery true values use `epsilon ~ Unif(0.15, 0.35)` and
+`mu ~ Unif(0.1, 0.4)`. See `models/social/dw_bounds.py` and `configs/dw.toml`
+(R=1000 replicates per parameter draw). To regenerate training data from
+scratch, run `make -C scripts/dw clean` then `make -C scripts/dw all`.
 
 Training data generation (`make -C scripts/MODEL generate-data`) is optional
 when `data/MODEL/cov_train.csv` already exists. Skip it unless I ask to
@@ -244,7 +249,9 @@ Created by `wire-to-jags` (gitignored; not in the repository). Required files:
 
 ### Training (`results/MODEL/final_summary.json`)
 
-- `overall_r2` must be **>= 0.999** (the pipeline exits non-zero otherwise)
+- `overall_r2` must meet the model's training gate (default **>= 0.999** in
+  `src/asl/presets/full.toml`; `dw` overrides to **>= 0.995** in
+  `configs/dw.toml`)
 - Architecture must match the table above
 
 Reference values (approximate; small differences on CPU are fine):
@@ -254,7 +261,7 @@ Reference values (approximate; small differences on CPU are fine):
 | `ddm3` | 0.99992 |
 | `ddm4` | similar |
 | `ddmcollapsesig` | 0.99969 |
-| `dw` | 0.99928 |
+| `dw` | 0.997 |
 
 ### Recovery (`results/MODEL/recovery_summary.json`, `results/MODEL/recovery_subjects.json`)
 
@@ -295,12 +302,12 @@ comparable, not identical):
 | k | 0.958 | 0.940 |
 | t0 | 0.994 | 0.962 |
 
-**dw**
+**dw** (canonical uniform parameters; `DeepWide_32x6`, R=1000)
 
 | Parameter | Correlation | Coverage |
 |---|---|---|
-| logit_epsilon | 0.976 | 0.940 |
-| logit_mu | 0.967 | 0.936 |
+| epsilon | 0.985 | 0.96 |
+| mu | 0.949 | 0.972 |
 
 ### Diagnostic plot
 
@@ -343,13 +350,3 @@ Report back with:
 - contents of `final_summary.json` and `recovery_summary.json`
 - whether each gate passed or failed
 - any error messages from the failing stage
-
-## Optional: high-N supplemental recovery
-
-Only if I ask for it:
-
-```bash
-ASL_CONFIG=configs/recovery_highn.toml make -C scripts/MODEL confirm-recovery
-```
-
-This runs 50 subjects x 10,000 trials (supported for `ddm3` and `ddm4`).
