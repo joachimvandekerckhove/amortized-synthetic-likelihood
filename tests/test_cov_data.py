@@ -22,6 +22,7 @@ from asl.cov_data import (
     expected_columns,
     load_cov_settings,
     logspace_to_raw,
+    report_summary_mi_gate,
     resolve_cov_settings,
     save_cov_settings,
     summaries_to_logspace,
@@ -145,3 +146,31 @@ class TestCovTrainingQA:
             draw_cov_parameters=lambda _rng: custom.copy(),
         )
         assert np.array_equal(draw_parameters(hooked, rng), custom)
+
+    def test_report_summary_mi_gate(self, toy_model, config_file):
+        config_file(
+            "[cov_data]\n"
+            "summary_mi_permutations = 8\n"
+            "summary_mi_subsample = 200\n"
+        )
+        rng = np.random.default_rng(2)
+        n = 400
+        X = np.column_stack(
+            [rng.uniform(lo, hi, n) for lo, hi in toy_model.param_bounds]
+        )
+        y_raw = np.column_stack(
+            [
+                np.clip(0.5 + 0.1 * X[:, 0], 0.01, 0.99),
+                0.3 + 0.05 * X[:, 1] + 0.01 * rng.standard_normal(n),
+                0.01 + 0.001 * np.abs(X[:, 0]) + 0.001 * rng.standard_normal(n),
+            ]
+        )
+        report = report_summary_mi_gate(
+            X=X,
+            y_raw=y_raw,
+            model=toy_model,
+            n_perm=8,
+            subsample=200,
+        )
+        assert report["gate_passes"]
+        assert len(report["summaries"]) == toy_model.n_summaries

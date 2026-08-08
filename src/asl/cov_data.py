@@ -112,6 +112,25 @@ def check_summary_variance_gate(
         sys.exit(1)
 
 
+def _summary_parameter_mi_vector(
+    summary_col: np.ndarray,
+    param_cols: np.ndarray,
+    *,
+    neighbors: int,
+    random_state: int,
+) -> np.ndarray:
+    """MI between one summary and each parameter column."""
+    mi = np.empty(param_cols.shape[1], dtype=np.float64)
+    for j in range(param_cols.shape[1]):
+        mi[j] = mutual_info_regression(
+            param_cols[:, [j]],
+            summary_col,
+            random_state=random_state,
+            n_neighbors=neighbors,
+        )[0]
+    return mi
+
+
 def _max_summary_parameter_mi(
     summary_col: np.ndarray,
     param_cols: np.ndarray,
@@ -155,6 +174,82 @@ def _summary_mi_threshold(
     return float(np.quantile(nulls, quantile))
 
 
+def report_summary_mi_gate(
+    y_raw: np.ndarray,
+    X: np.ndarray,
+    model: Model,
+    *,
+    n_perm: int = SUMMARY_MI_PERMUTATIONS_DEFAULT,
+    subsample: int = SUMMARY_MI_SUBSAMPLE_DEFAULT,
+    quantile: float = SUMMARY_MI_QUANTILE_DEFAULT,
+    neighbors: int = SUMMARY_MI_NEIGHBORS_DEFAULT,
+    seed: int = SEED_DEFAULT,
+) -> dict:
+    """Return per-summary MI diagnostics (same test as check_summary_mi_gate)."""
+    n_rows = len(y_raw)
+    if subsample is not None and n_rows > subsample:
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(n_rows, size=subsample, replace=False)
+        y_sub = y_raw[idx]
+        x_sub = X[idx]
+        n_used = subsample
+    else:
+        y_sub = y_raw
+        x_sub = X
+        n_used = n_rows
+
+    summary_reports: list[dict] = []
+    failures: list[str] = []
+    for j, name in enumerate(model.summary_names):
+        summary_col = y_sub[:, j]
+        mi_by_param = _summary_parameter_mi_vector(
+            summary_col, x_sub, neighbors=neighbors, random_state=seed
+        )
+        mi_max = float(np.max(mi_by_param))
+        best_idx = int(np.argmax(mi_by_param))
+        threshold = _summary_mi_threshold(
+            summary_col,
+            x_sub,
+            n_perm=n_perm,
+            neighbors=neighbors,
+            quantile=quantile,
+            random_state=seed + j + 1,
+        )
+        passes = mi_max > threshold
+        if not passes:
+            failures.append(f"{name} (mi_max={mi_max:.4f}, thr={threshold:.4f})")
+        summary_reports.append(
+            {
+                "name": name,
+                "variance": float(np.var(y_sub[:, j])),
+                "mi_max": mi_max,
+                "best_parameter": model.param_names[best_idx],
+                "threshold": threshold,
+                "passes": passes,
+                "mi_by_parameter": {
+                    param_name: float(mi_by_param[k])
+                    for k, param_name in enumerate(model.param_names)
+                },
+            }
+        )
+
+    return {
+        "model": model.slug,
+        "n_rows_total": n_rows,
+        "n_rows_used": n_used,
+        "settings": {
+            "n_perm": n_perm,
+            "subsample": subsample,
+            "quantile": quantile,
+            "neighbors": neighbors,
+            "seed": seed,
+        },
+        "summaries": summary_reports,
+        "gate_passes": not failures,
+        "failures": failures,
+    }
+
+
 def check_summary_mi_gate(
     y_raw: np.ndarray,
     X: np.ndarray,
@@ -167,35 +262,18 @@ def check_summary_mi_gate(
     seed: int = SEED_DEFAULT,
 ) -> None:
     """Require each summary to carry detectable MI with at least one parameter."""
-    n_rows = len(y_raw)
-    if subsample is not None and n_rows > subsample:
-        rng = np.random.default_rng(seed)
-        idx = rng.choice(n_rows, size=subsample, replace=False)
-        y_sub = y_raw[idx]
-        x_sub = X[idx]
-    else:
-        y_sub = y_raw
-        x_sub = X
-
-    failures: list[str] = []
-    for j, name in enumerate(model.summary_names):
-        summary_col = y_sub[:, j]
-        mi_max = _max_summary_parameter_mi(
-            summary_col, x_sub, neighbors=neighbors, random_state=seed
-        )
-        threshold = _summary_mi_threshold(
-            summary_col,
-            x_sub,
-            n_perm=n_perm,
-            neighbors=neighbors,
-            quantile=quantile,
-            random_state=seed + j + 1,
-        )
-        if mi_max <= threshold:
-            failures.append(f"{name} (mi_max={mi_max:.4f}, thr={threshold:.4f})")
-
-    if failures:
-        msg = "Summary MI gate failed for: " + "; ".join(failures)
+    report = report_summary_mi_gate(
+        y_raw,
+        X,
+        model,
+        n_perm=n_perm,
+        subsample=subsample,
+        quantile=quantile,
+        neighbors=neighbors,
+        seed=seed,
+    )
+    if not report["gate_passes"]:
+        msg = "Summary MI gate failed for: " + "; ".join(report["failures"])
         print(f"[cov_data] FAIL: {msg}", file=sys.stderr)
         sys.exit(1)
 
