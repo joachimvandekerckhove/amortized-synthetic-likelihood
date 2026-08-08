@@ -2,11 +2,11 @@
 # Used by: make -C scripts/dw all
 
 [cov_data]
-replicates_per_parameter = 2000
+replicates_per_parameter = 1000
 trials_per_replicate = 600
 
 [training]
-architecture = "DeepWide_128x6"
+architecture = "DeepWide_32x6"
 training_epochs = 20000
 learning_rate = 0.0003
 batch_size = 512
