@@ -1,0 +1,8 @@
+{
+  "parameter_draws_attempted": 20000,
+  "parameter_rows_retained": 20000,
+  "parameter_rows_rejected": 0,
+  "replicates_attempted": 20000000,
+  "replicates_rejected": 0,
+  "summary_mi_warnings": []
+}
