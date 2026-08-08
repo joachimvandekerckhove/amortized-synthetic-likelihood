@@ -163,18 +163,18 @@ Expected emulator accuracy (reference machine):
 
 | Summary | R² |
 |---|---|
-| Accuracy | 0.99994 |
-| log(1 + mean RT) | 0.99994 |
-| log(1 + Var[RT]) | 0.99978 |
-| Overall | 0.99992 |
+| Accuracy | 0.99990 |
+| log(1 + mean RT) | 0.99991 |
+| log(1 + Var[RT]) | 0.99979 |
+| Overall | 0.99986 |
 
 Expected recovery (MCMC is stochastic; expect small differences across machines):
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
-| v | 0.997 | 0.950 |
-| a | 0.995 | 0.944 |
-| t0 | 0.977 | 0.938 |
+| v | 0.998 | 0.962 |
+| a | 0.989 | 0.964 |
+| t0 | 0.941 | 0.966 |
 
 ### 4.2 `ddm4`
 
@@ -186,10 +186,10 @@ Expected recovery:
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
-| v | 0.991 | 0.948 |
-| a | 0.993 | 0.954 |
-| t0 | 0.971 | 0.950 |
-| w | 0.990 | 0.964 |
+| v | 0.995 | 0.960 |
+| a | 0.986 | 0.958 |
+| t0 | 0.912 | 0.962 |
+| w | 0.974 | 0.976 |
 
 ### 4.3 `ddmcollapsesig`
 
@@ -207,10 +207,10 @@ Expected recovery:
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
-| a0 | 0.963 | 0.926 |
-| v | 0.997 | 0.968 |
-| k | 0.912 | 0.930 |
-| t0 | 0.988 | 0.948 |
+| a0 | 0.951 | 0.964 |
+| v | 0.996 | 0.960 |
+| k | 0.947 | 0.966 |
+| t0 | 0.982 | 0.962 |
 
 ### 4.4 `dw`
 
@@ -228,20 +228,24 @@ Expected emulator accuracy (reference machine):
 
 | Summary | R² |
 |---|---|
-| Effective clusters (final) | 0.997 |
-| Opinion entropy (final) | 0.996 |
-| Mean opinion shift | 0.997 |
-| Late opinion variance | 0.996 |
-| Abs. variance change | 0.996 |
-| Large-move rate | 0.991 |
-| Overall | 0.997 |
+| Effective clusters (final) | 0.998 |
+| Opinion entropy (final) | 0.998 |
+| Mean opinion shift | 0.999 |
+| Late opinion variance | 0.998 |
+| Abs. variance change | 0.999 |
+| Large-move rate | 0.997 |
+| Overall | 0.998 |
 
 Expected recovery (MCMC is stochastic; expect small differences across machines):
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
-| epsilon | 0.985 | 0.96 |
-| mu | 0.949 | 0.972 |
+| epsilon | 0.980 | 0.84 |
+| mu | 0.964 | 0.84 |
+
+Note: after regenerating training data with the simultaneous pair-update fix,
+recovery correlations remain high but 95% CI coverage currently falls below
+the 90% gate (under-coverage). This is under investigation.
 
 ## 5. Coverage gates
 
