@@ -2,8 +2,8 @@
 #
 # Defaults live in src/asl/presets/full.toml and are not meant to be edited.
 # Override individual keys here. Scenario-specific overrides can be layered
-# via ASL_CONFIG:
-#   ASL_CONFIG=configs/recovery_highn.toml make -C scripts/ddm3 confirm-recovery
+# via ASL_CONFIG, for example:
+#   ASL_CONFIG=configs/dw.toml make -C scripts/dw all
 
 [wire]
 # Optional: override auto-downloaded SDK in vendor/ (see README).

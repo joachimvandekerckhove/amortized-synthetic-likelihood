@@ -32,15 +32,12 @@ ez-compare: $(EZ_COMPARE)
 $(EZ_COMPARE): $(JNNX)
 	$(ENV) $(PY) $(ROOT)/scripts/$(MODEL)/ez_compare.py
 
-.PHONY: generate-data train-emulator wire-to-jags confirm-recovery confirm-recovery-highn ez-compare clean clean-generated
+.PHONY: generate-data train-emulator wire-to-jags confirm-recovery ez-compare clean clean-generated
 
 generate-data: $(DATA)
 train-emulator: $(ONNX)
 wire-to-jags: $(JNNX)
 confirm-recovery: $(RECOVERY)
-
-confirm-recovery-highn:
-	$(ENV) ASL_CONFIG=$(ROOT)/configs/recovery_highn.toml $(PY) $(RUN) confirm-recovery
 
 clean-generated:
 	rm -rf $(ROOT)/results/$(MODEL) \

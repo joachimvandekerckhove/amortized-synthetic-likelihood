@@ -11,7 +11,7 @@ class TestConfigMerge:
     def test_asl_config_merges_overrides(
         self, repo_root: Path, tmp_path, monkeypatch
     ):
-        override = tmp_path / "recovery_highn.toml"
+        override = tmp_path / "override.toml"
         override.write_text(
             "[recovery]\nsynthetic_subjects = 12\n",
             encoding="utf-8",

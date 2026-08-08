@@ -27,15 +27,12 @@ $(JNNX): $(ONNX) $(TRANSFORM)
 $(RECOVERY): $(JNNX)
 	$(ENV) $(PY) $(RUN) confirm-recovery
 
-.PHONY: generate-data train-emulator wire-to-jags confirm-recovery confirm-recovery-highn clean clean-generated
+.PHONY: generate-data train-emulator wire-to-jags confirm-recovery clean clean-generated
 
 generate-data: $(DATA)
 train-emulator: $(ONNX)
 wire-to-jags: $(JNNX)
 confirm-recovery: $(RECOVERY)
-
-confirm-recovery-highn:
-	$(ENV) ASL_CONFIG=$(ROOT)/configs/recovery_highn.toml $(PY) $(RUN) confirm-recovery
 
 clean-generated:
 	rm -rf $(ROOT)/results/$(MODEL) \
