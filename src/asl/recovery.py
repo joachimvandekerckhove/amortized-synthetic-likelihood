@@ -93,6 +93,9 @@ def resolve_recovery_settings() -> dict:
         "n_burnin": N_BURNIN,
         "n_chains": N_CHAINS,
         "min_success_rate": float(config.get("recovery", "min_success_rate", 0.98)),
+        "max_retries_per_subject": int(
+            config.get("recovery", "max_retries_per_subject", 5)
+        ),
     }
 
 
@@ -184,8 +187,12 @@ def build_jags_model_string(model: Model, obs: dict) -> str:
     return "\n".join(lines)
 
 
-def _recover_one_subject(args: tuple) -> dict:
-    slug, true_params, subj_seed, settings = args
+def _recover_one_subject_attempt(
+    slug: str,
+    true_params: np.ndarray,
+    subj_seed: int,
+    settings: dict,
+) -> dict:
     from py2jags import run_jags
 
     model = get_model(slug)
@@ -247,6 +254,24 @@ def _recover_one_subject(args: tuple) -> dict:
         "ci_hi": ci_hi,
         "rhats": rhats,
     }
+
+
+def _recover_one_subject(args: tuple) -> dict:
+    slug, subj_idx, rng_seed, settings = args
+    model = get_model(slug)
+    rng = np.random.default_rng(rng_seed)
+    max_retries = int(settings["max_retries_per_subject"])
+    last_result: dict = {"status": "failed", "reason": "exhausted_retries"}
+
+    for retry in range(max_retries):
+        true_params = draw_from_prior(model, rng)
+        subj_seed = 1000 + subj_idx + retry * 100_000
+        result = _recover_one_subject_attempt(slug, true_params, subj_seed, settings)
+        if result["status"] == "converged":
+            return result
+        last_result = result
+
+    return last_result
 
 
 def write_recovery_subjects(
@@ -311,12 +336,10 @@ def run_recovery_study(model: Model) -> None:
         f"(each uses {n_chains} cores for chains)"
     )
 
-    rng = np.random.default_rng(SEED_DEFAULT)
-    work_items = []
-    for subj in range(settings["n_subjects"]):
-        true_params = draw_from_prior(model, rng)
-        subj_seed = 1000 + subj
-        work_items.append((slug, true_params, subj_seed, settings))
+    work_items = [
+        (slug, subj, SEED_DEFAULT + subj, settings)
+        for subj in range(settings["n_subjects"])
+    ]
 
     true_params_list = []
     estimated_params_list = []

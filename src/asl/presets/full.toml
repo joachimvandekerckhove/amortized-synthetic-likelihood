@@ -23,3 +23,4 @@ summary_mi_neighbors = 5
 synthetic_subjects = 500
 trials_per_subject = 500
 min_success_rate = 0.98
+max_retries_per_subject = 5
