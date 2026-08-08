@@ -11,7 +11,7 @@ import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
 from asl.config import load_config
-from asl.cov_data import load_cov_dataset, load_cov_settings
+from asl.cov_data import SEED_DEFAULT, load_cov_dataset, load_cov_settings
 from asl.data import TargetTransform, save_target_transform, summary_column_masks
 from asl.export import export_onnx
 from asl.mlp import DEVICE, build_architecture, resolve_training_settings
@@ -26,6 +26,7 @@ from asl.cholesky import (
 from asl.spec import Model
 
 COV_LAMBDA = 1.0
+VAL_FRACTION = 0.2
 
 
 class DualHeadNet(nn.Module):
@@ -63,6 +64,15 @@ def build_C1_std_array(
     return np.stack(rows, axis=0).astype(np.float32)
 
 
+def split_train_val(n_rows: int, val_fraction: float = VAL_FRACTION) -> tuple[int, int]:
+    """Deterministic row split: first (1-f) rows train, remainder validation."""
+    n_val = max(1, int(round(n_rows * val_fraction)))
+    n_train = n_rows - n_val
+    if n_train < 1:
+        raise ValueError(f"Need at least 2 rows for train/val split, got {n_rows}")
+    return n_train, n_val
+
+
 def train_one_epoch(
     model: DualHeadNet,
     optimizer: torch.optim.Optimizer,
@@ -72,10 +82,13 @@ def train_one_epoch(
     n_summaries: int,
     batch_size: int,
     cov_lambda: float = COV_LAMBDA,
+    seed: int = SEED_DEFAULT,
 ) -> None:
     model.train()
     n = X_tensor.shape[0]
-    indices = torch.randperm(n, device=DEVICE)
+    generator = torch.Generator(device=DEVICE)
+    generator.manual_seed(seed)
+    indices = torch.randperm(n, device=DEVICE, generator=generator)
 
     for start in range(0, n, batch_size):
         batch_idx = indices[start : start + batch_size]
@@ -143,25 +156,29 @@ def compute_emulator_error_cov(
 
 def retrain_dual_head_model(
     build_fn,
-    X: np.ndarray,
-    z_mean: np.ndarray,
-    C1_std: np.ndarray,
+    X_train: np.ndarray,
+    z_mean_train: np.ndarray,
+    C1_std_train: np.ndarray,
     rt_mask: np.ndarray,
     n_summaries: int,
     n_epochs: int,
     batch_size: int,
     lr: float,
     cov_lambda: float = COV_LAMBDA,
+    seed: int = SEED_DEFAULT,
 ) -> tuple[DualHeadNet, StandardScaler, TargetTransform]:
-    x_scaler = StandardScaler()
-    X_s = x_scaler.fit_transform(X).astype(np.float32)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
 
-    target_transform = build_target_transform(rt_mask, z_mean)
-    mu_std = target_transform.scaler.transform(z_mean).astype(np.float32)
+    x_scaler = StandardScaler()
+    X_s = x_scaler.fit_transform(X_train).astype(np.float32)
+
+    target_transform = build_target_transform(rt_mask, z_mean_train)
+    mu_std = target_transform.scaler.transform(z_mean_train).astype(np.float32)
 
     X_tensor = torch.from_numpy(X_s).to(DEVICE)
     mu_tensor = torch.from_numpy(mu_std).to(DEVICE)
-    C1_tensor = torch.from_numpy(C1_std).to(DEVICE)
+    C1_tensor = torch.from_numpy(C1_std_train).to(DEVICE)
 
     base_net = build_fn().to(DEVICE)
     net = DualHeadNet(base_net, n_summaries).to(DEVICE)
@@ -179,6 +196,7 @@ def retrain_dual_head_model(
             n_summaries,
             batch_size,
             cov_lambda=cov_lambda,
+            seed=seed + epoch,
         )
         scheduler.step()
         if (epoch + 1) % 50 == 0:
@@ -196,6 +214,7 @@ def train_emulator(model: Model) -> None:
     settings = resolve_training_settings()
     rt_mask, _ = summary_column_masks(model)
     cov_lambda = float(config.get("training", "covariance_loss_weight", COV_LAMBDA))
+    seed = int(config.get("training", "random_seed", SEED_DEFAULT))
 
     arch_name = config.get("training", "architecture") or model.default_architecture
     if not arch_name:
@@ -206,50 +225,73 @@ def train_emulator(model: Model) -> None:
     print(f"[train] Device: {DEVICE}")
     print(f"[train] Architecture: {arch_name}")
     print(f"[train] Settings: {settings}")
+    print(f"[train] Random seed: {seed}")
     print(f"[train] Covariance loss weight: {cov_lambda}")
 
-    X, z_mean, C1_z, y_raw, _ = load_cov_dataset(model)
+    X, z_mean, C1_z, y_raw, _ = load_cov_dataset(model, seed=seed)
+    n_train, _ = split_train_val(len(X))
     print(
-        f"[train] Loaded {X.shape[0]} rows, {X.shape[1]} params, "
-        f"{z_mean.shape[1]} summaries"
+        f"[train] Loaded {X.shape[0]} rows ({n_train} train, {len(X) - n_train} val), "
+        f"{X.shape[1]} params, {z_mean.shape[1]} summaries"
     )
+
+    X_train, X_val = X[:n_train], X[n_train:]
+    z_mean_train, z_mean_val = z_mean[:n_train], z_mean[n_train:]
+    C1_z_train, C1_z_val = C1_z[:n_train], C1_z[n_train:]
+    y_raw_train, y_raw_val = y_raw[:n_train], y_raw[n_train:]
 
     build_fn = build_architecture(arch_name, model.n_params, model.n_summaries)
     results_dir = Path("results") / slug
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    target_transform = build_target_transform(rt_mask, z_mean)
-    C1_std = build_C1_std_array(C1_z, target_transform.scaler.scale_, model.n_summaries)
+    target_transform = build_target_transform(rt_mask, z_mean_train)
+    C1_std_train = build_C1_std_array(
+        C1_z_train, target_transform.scaler.scale_, model.n_summaries
+    )
+    C1_std_val = build_C1_std_array(
+        C1_z_val, target_transform.scaler.scale_, model.n_summaries
+    )
 
     print("[train] Training dual-head model ...")
+    t_train_start = time.monotonic()
     final_net, x_scaler, target_transform = retrain_dual_head_model(
         build_fn=build_fn,
-        X=X,
-        z_mean=z_mean,
-        C1_std=C1_std,
+        X_train=X_train,
+        z_mean_train=z_mean_train,
+        C1_std_train=C1_std_train,
         rt_mask=rt_mask,
         n_summaries=model.n_summaries,
         n_epochs=settings["n_epochs"],
         batch_size=settings["batch_size"],
         lr=settings["lr"],
         cov_lambda=cov_lambda,
+        seed=seed,
     )
+    train_time_seconds = time.monotonic() - t_train_start
 
-    X_s = x_scaler.transform(X).astype(np.float32)
-    X_tensor = torch.from_numpy(X_s).to(DEVICE)
-    C1_tensor = torch.from_numpy(C1_std).to(DEVICE)
+    X_val_s = x_scaler.transform(X_val).astype(np.float32)
+    X_val_tensor = torch.from_numpy(X_val_s).to(DEVICE)
+    C1_val_tensor = torch.from_numpy(C1_std_val).to(DEVICE)
 
-    overall_r2, per_target_r2 = evaluate_mean_r2(
-        final_net, X_tensor, y_raw, target_transform
+    train_r2, per_train_r2 = evaluate_mean_r2(
+        final_net,
+        torch.from_numpy(x_scaler.transform(X_train).astype(np.float32)).to(DEVICE),
+        y_raw_train,
+        target_transform,
     )
-    cov_stein = evaluate_cov_stein(final_net, X_tensor, C1_tensor, model.n_summaries)
-    mu_std_targets = target_transform.scaler.transform(z_mean).astype(np.float64)
+    val_r2, per_val_r2 = evaluate_mean_r2(
+        final_net, X_val_tensor, y_raw_val, target_transform
+    )
+    cov_stein_val = evaluate_cov_stein(
+        final_net, X_val_tensor, C1_val_tensor, model.n_summaries
+    )
+    mu_std_val = target_transform.scaler.transform(z_mean_val).astype(np.float64)
     n_rep, n_replicates = load_cov_settings(slug)
-    mean_C1_std = np.mean(C1_std, axis=0)
+    mean_C1_std = np.mean(C1_std_val, axis=0)
     sigma_emu = compute_emulator_error_cov(
         final_net,
-        X_tensor,
-        mu_std_targets,
+        X_val_tensor,
+        mu_std_val,
         mean_C1_std,
         n_rep,
         n_replicates,
@@ -257,17 +299,23 @@ def train_emulator(model: Model) -> None:
     save_emulator_error_cov(slug, sigma_emu, n_rep=n_rep, n_replicates=n_replicates)
     print(f"[train] Emulator error cov diag: {np.diag(sigma_emu).tolist()}")
     print(
-        f"[train] Final mean-head R^2: overall={overall_r2:.6f}, "
-        f"per_target={per_target_r2.tolist()}"
+        f"[train] Mean-head R^2: train={train_r2:.6f}, val={val_r2:.6f}, "
+        f"per_summary_val={per_val_r2.tolist()}"
     )
-    print(f"[train] Final Stein cov loss: {cov_stein:.6f}")
+    print(f"[train] Validation Stein cov loss: {cov_stein_val:.6f}")
 
     summary = {
         "architecture": arch_name,
-        "overall_r2": overall_r2,
-        "per_target_r2": per_target_r2.tolist(),
-        "cov_stein_loss": cov_stein,
+        "random_seed": seed,
+        "n_train": n_train,
+        "n_val": len(X_val),
+        "train_r2": train_r2,
+        "val_r2": val_r2,
+        "per_summary_r2_train": dict(zip(model.summary_names, per_train_r2.tolist())),
+        "per_summary_r2_val": dict(zip(model.summary_names, per_val_r2.tolist())),
+        "cov_stein_loss_val": cov_stein_val,
         "cov_lambda": cov_lambda,
+        "train_time_seconds": train_time_seconds,
         "n_params": final_net.count_trainable_parameters(),
         "summary_names": list(model.summary_names),
         "output_names": list(model.output_names),
@@ -281,10 +329,10 @@ def train_emulator(model: Model) -> None:
     print(f"[train] Exported ONNX: {onnx_path}")
 
     threshold = float(config.get("training", "mean_r2_threshold", 0.999))
-    if overall_r2 < threshold:
+    if val_r2 < threshold:
         print(
-            f"[train] FAIL: Overall mean-head R^2 = {overall_r2:.6f} < {threshold}",
+            f"[train] FAIL: Validation mean-head R^2 = {val_r2:.6f} < {threshold}",
             file=sys.stderr,
         )
         sys.exit(1)
-    print(f"[train] PASS: mean-head R^2 = {overall_r2:.6f} >= {threshold}")
+    print(f"[train] PASS: validation mean-head R^2 = {val_r2:.6f} >= {threshold}")

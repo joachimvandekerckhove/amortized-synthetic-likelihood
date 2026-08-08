@@ -108,6 +108,13 @@ def debias_emulator_error_cov(
     correction = np.asarray(mean_C1_std, dtype=np.float64) / (n_replicates * n_rep)
     sigma_emu = np.asarray(residual_cov, dtype=np.float64) - correction
     eigvals, eigvecs = np.linalg.eigh(sigma_emu)
+    if np.any(eigvals < 0):
+        worst = float(np.min(eigvals))
+        n_neg = int(np.sum(eigvals < 0))
+        print(
+            f"[train] spectral projection: {n_neg} negative eigenvalue(s), "
+            f"min={worst:.2e}"
+        )
     eigvals = np.maximum(eigvals, 1e-10)
     return (eigvecs * eigvals) @ eigvecs.T
 

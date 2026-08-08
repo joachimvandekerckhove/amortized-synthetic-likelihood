@@ -6,12 +6,13 @@ batch_size = 4096
 learning_rate = 0.001
 covariance_loss_weight = 1.0
 mean_r2_threshold = 0.999
+random_seed = 1
 
 [cov_data]
 parameter_draws = 20000
 trials_per_replicate = 600
 replicates_per_parameter = 120
-random_seed = 42
+random_seed = 1
 min_summary_variance = 1.0e-12
 summary_mi_permutations = 30
 summary_mi_subsample = 5000
@@ -21,3 +22,4 @@ summary_mi_neighbors = 5
 [recovery]
 synthetic_subjects = 500
 trials_per_subject = 500
+min_success_rate = 0.98

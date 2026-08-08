@@ -7,8 +7,10 @@ from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
 import numpy as np
+from scipy import stats
 
 from asl.config import load_config
+from asl.cov_data import SEED_DEFAULT
 from asl.data import load_target_transform
 from asl.figures import plot_recovery_diagnostics
 from asl.onnxruntime_sdk import ensure_onnxruntime_lib_on_path
@@ -90,6 +92,7 @@ def resolve_recovery_settings() -> dict:
         "n_iter": N_MCMC_ITER,
         "n_burnin": N_BURNIN,
         "n_chains": N_CHAINS,
+        "min_success_rate": float(config.get("recovery", "min_success_rate", 0.98)),
     }
 
 
@@ -109,6 +112,32 @@ def resolve_true_param_bounds(model: Model) -> tuple[tuple[float, float], ...]:
         lo, hi = float(item[0]), float(item[1])
         bounds.append((lo, hi))
     return tuple(bounds)
+
+
+def draw_from_prior(model: Model, rng: np.random.Generator) -> np.ndarray:
+    """Draw one parameter vector from the JAGS inference prior."""
+    params = np.empty(model.n_params)
+    for i, (name, (lo, hi)) in enumerate(zip(model.param_names, model.prior_bounds)):
+        prior_line = model.recovery_priors.get(name, "")
+        if "dnorm" in prior_line:
+            sigma = (hi - lo) / 4.0
+            mu = (lo + hi) / 2.0
+            a, b = (lo - mu) / sigma, (hi - mu) / sigma
+            params[i] = float(stats.truncnorm.rvs(a, b, loc=mu, scale=sigma, random_state=rng))
+        else:
+            params[i] = float(rng.uniform(lo, hi))
+    return params
+
+
+def check_success_rate_gate(n_converged: int, n_attempted: int, min_rate: float) -> None:
+    rate = n_converged / n_attempted if n_attempted else 0.0
+    if rate < min_rate:
+        print(
+            f"[recovery] FAIL: success rate {rate:.3f} < {min_rate:.3f} "
+            f"({n_converged}/{n_attempted} converged)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def iqr_interval(lo: float, hi: float) -> tuple[float, float]:
@@ -155,7 +184,7 @@ def build_jags_model_string(model: Model, obs: dict) -> str:
     return "\n".join(lines)
 
 
-def _recover_one_subject(args: tuple) -> dict | None:
+def _recover_one_subject(args: tuple) -> dict:
     slug, true_params, subj_seed, settings = args
     from py2jags import run_jags
 
@@ -167,7 +196,7 @@ def _recover_one_subject(args: tuple) -> dict | None:
         model, true_params, settings["n_trials"], subj_seed
     )
     if not obs["valid"]:
-        return None
+        return {"status": "failed", "reason": "invalid_simulation"}
 
     model_string = build_jags_model_string(model, obs)
     obs_raw = np.asarray(obs["obs"], dtype=np.float64)
@@ -191,8 +220,8 @@ def _recover_one_subject(args: tuple) -> dict | None:
             parallel=True,
             maxcores=settings["n_chains"],
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        return {"status": "failed", "reason": "jags_exception", "exception": str(exc)}
 
     est = np.empty(model.n_params)
     ci_lo = np.empty(model.n_params)
@@ -206,10 +235,12 @@ def _recover_one_subject(args: tuple) -> dict | None:
         ci_hi[i] = np.percentile(samples, 97.5)
         rhats[i] = result.rhat(name)
 
-    if np.any(rhats > 1.1):
-        return None
+    rhat_max = float(np.max(rhats))
+    if rhat_max > 1.1:
+        return {"status": "failed", "reason": "rhat", "rhat_max": rhat_max}
 
     return {
+        "status": "converged",
         "true_params": true_params,
         "est": est,
         "ci_lo": ci_lo,
@@ -270,7 +301,7 @@ def run_recovery_study(model: Model) -> None:
     print(f"[recovery] Model: {slug}")
     print(f"[recovery] Settings: {settings}")
     true_draw_bounds = resolve_true_param_bounds(model)
-    print(f"[recovery] True-parameter draws: {true_draw_bounds}")
+    print(f"[recovery] True-parameter draws: inference prior via draw_from_prior()")
     print("[recovery] Chain inits: uniform on per-parameter IQR of prior bounds")
 
     n_chains = settings["n_chains"]
@@ -280,12 +311,10 @@ def run_recovery_study(model: Model) -> None:
         f"(each uses {n_chains} cores for chains)"
     )
 
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(SEED_DEFAULT)
     work_items = []
     for subj in range(settings["n_subjects"]):
-        true_params = np.empty(model.n_params)
-        for i, (lo, hi) in enumerate(true_draw_bounds):
-            true_params[i] = rng.uniform(lo, hi)
+        true_params = draw_from_prior(model, rng)
         subj_seed = 1000 + subj
         work_items.append((slug, true_params, subj_seed, settings))
 
@@ -294,6 +323,7 @@ def run_recovery_study(model: Model) -> None:
     ci_lower_list = []
     ci_upper_list = []
     rhat_list = []
+    failure_counts: dict[str, int] = {}
     n_failed = 0
     report_interval = recovery_report_interval(settings["n_subjects"])
     t0 = time.monotonic()
@@ -302,7 +332,7 @@ def run_recovery_study(model: Model) -> None:
         for i, result in enumerate(
             pool.imap_unordered(_recover_one_subject, work_items, chunksize=1)
         ):
-            if result is not None:
+            if result.get("status") == "converged":
                 true_params_list.append(result["true_params"])
                 estimated_params_list.append(result["est"])
                 ci_lower_list.append(result["ci_lo"])
@@ -310,6 +340,8 @@ def run_recovery_study(model: Model) -> None:
                 rhat_list.append(result["rhats"])
             else:
                 n_failed += 1
+                reason = result.get("reason", "unknown")
+                failure_counts[reason] = failure_counts.get(reason, 0) + 1
 
             if (i + 1) % report_interval == 0 or (i + 1) == settings["n_subjects"]:
                 print(
@@ -322,13 +354,18 @@ def run_recovery_study(model: Model) -> None:
                     )
                 )
 
+    recovery_time_seconds = time.monotonic() - t0
     print(
         f"[recovery] Finished: {len(true_params_list)} converged, {n_failed} failed"
     )
+    if failure_counts:
+        print(f"[recovery] Failure counts: {failure_counts}")
 
-    if len(true_params_list) < 3:
-        print("[recovery] FAIL: Too few converged subjects.", file=sys.stderr)
-        sys.exit(1)
+    check_success_rate_gate(
+        len(true_params_list),
+        settings["n_subjects"],
+        settings["min_success_rate"],
+    )
 
     true_params_arr = np.array(true_params_list)
     est_params_arr = np.array(estimated_params_list)
@@ -379,6 +416,9 @@ def run_recovery_study(model: Model) -> None:
     summary = {
         "n_converged": len(true_params_list),
         "n_attempted": settings["n_subjects"],
+        "n_failed": n_failed,
+        "failure_counts": failure_counts,
+        "recovery_time_seconds": recovery_time_seconds,
         "correlations": dict(zip(model.param_names, correlations)),
         "coverages_95ci": dict(zip(model.param_names, coverages)),
         "mean_rhat": dict(zip(model.param_names, np.mean(rhat_list, axis=0).tolist())),
