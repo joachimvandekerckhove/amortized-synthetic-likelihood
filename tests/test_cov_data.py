@@ -15,14 +15,15 @@ from asl.cov_data import (
     R,
     SEED_DEFAULT,
     c1_column_names,
-    check_summary_mi_gate,
+    check_parameter_mi_gate,
     check_summary_variance_gate,
     cov_settings_path,
     draw_parameters,
     expected_columns,
     load_cov_settings,
     logspace_to_raw,
-    report_summary_mi_gate,
+    report_parameter_mi_gate,
+    report_summary_mi_diagnostic,
     resolve_cov_settings,
     save_cov_settings,
     summaries_to_logspace,
@@ -147,7 +148,7 @@ class TestCovTrainingQA:
         )
         assert np.array_equal(draw_parameters(hooked, rng), custom)
 
-    def test_report_summary_mi_gate(self, toy_model, config_file):
+    def test_report_summary_mi_diagnostic(self, toy_model, config_file):
         config_file(
             "[cov_data]\n"
             "summary_mi_permutations = 8\n"
@@ -165,12 +166,40 @@ class TestCovTrainingQA:
                 0.01 + 0.001 * np.abs(X[:, 0]) + 0.001 * rng.standard_normal(n),
             ]
         )
-        report = report_summary_mi_gate(
-            X=X,
+        report = report_summary_mi_diagnostic(
             y_raw=y_raw,
+            X=X,
             model=toy_model,
             n_perm=8,
             subsample=200,
         )
         assert report["gate_passes"]
         assert len(report["summaries"]) == toy_model.n_summaries
+
+    def test_parameter_mi_gate_fails_unidentified_parameter(self, toy_model, config_file):
+        config_file(
+            "[cov_data]\n"
+            "summary_mi_permutations = 8\n"
+            "summary_mi_subsample = 200\n"
+        )
+        rng = np.random.default_rng(3)
+        n = 400
+        theta1 = rng.uniform(-1, 1, n)
+        theta2 = rng.uniform(0.5, 2.0, n)
+        X = np.column_stack([theta1, theta2])
+        y_raw = np.column_stack(
+            [
+                np.clip(0.5 + 0.1 * theta1, 0.01, 0.99),
+                0.3 + 0.05 * theta1 + 0.01 * rng.standard_normal(n),
+                0.01 + 0.001 * np.abs(theta1) + 0.001 * rng.standard_normal(n),
+            ]
+        )
+        report = report_parameter_mi_gate(
+            y_raw=y_raw,
+            X=X,
+            model=toy_model,
+            n_perm=8,
+            subsample=200,
+        )
+        assert not report["gate_passes"]
+        assert any(item["name"] == "a" and not item["passes"] for item in report["parameters"])

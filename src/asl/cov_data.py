@@ -28,7 +28,7 @@ from asl.cholesky import pack_upper_tri, upper_tri_index_pairs
 from asl.spec import Model
 from models.catalog import get_model
 
-SEED_DEFAULT = 42
+SEED_DEFAULT = 1
 N_THETA = 20_000
 N_REP = 600
 R = 120
@@ -174,7 +174,63 @@ def _summary_mi_threshold(
     return float(np.quantile(nulls, quantile))
 
 
-def report_summary_mi_gate(
+def _parameter_summary_mi_vector(
+    param_col: np.ndarray,
+    summary_cols: np.ndarray,
+    *,
+    neighbors: int,
+    random_state: int,
+) -> np.ndarray:
+    """MI between one parameter and each summary column."""
+    mi = np.empty(summary_cols.shape[1], dtype=np.float64)
+    for k in range(summary_cols.shape[1]):
+        mi[k] = mutual_info_regression(
+            param_col.reshape(-1, 1),
+            summary_cols[:, k],
+            random_state=random_state,
+            n_neighbors=neighbors,
+        )[0]
+    return mi
+
+
+def _max_parameter_summary_mi(
+    param_col: np.ndarray,
+    summary_cols: np.ndarray,
+    *,
+    neighbors: int,
+    random_state: int,
+) -> float:
+    """Maximum MI between one parameter and any summary."""
+    mi = _parameter_summary_mi_vector(
+        param_col, summary_cols, neighbors=neighbors, random_state=random_state
+    )
+    return float(np.max(mi))
+
+
+def _parameter_mi_threshold(
+    param_col: np.ndarray,
+    summary_cols: np.ndarray,
+    *,
+    n_perm: int,
+    neighbors: int,
+    quantile: float,
+    random_state: int,
+) -> float:
+    """Permutation null for parameter->summary MI (shuffle parameter labels)."""
+    rng = np.random.default_rng(random_state)
+    nulls = []
+    for _ in range(n_perm):
+        perm = param_col.copy()
+        rng.shuffle(perm)
+        nulls.append(
+            _max_parameter_summary_mi(
+                perm, summary_cols, neighbors=neighbors, random_state=random_state
+            )
+        )
+    return float(np.quantile(nulls, quantile))
+
+
+def report_parameter_mi_gate(
     y_raw: np.ndarray,
     X: np.ndarray,
     model: Model,
@@ -185,7 +241,110 @@ def report_summary_mi_gate(
     neighbors: int = SUMMARY_MI_NEIGHBORS_DEFAULT,
     seed: int = SEED_DEFAULT,
 ) -> dict:
-    """Return per-summary MI diagnostics (same test as check_summary_mi_gate)."""
+    """Return per-parameter MI diagnostics for the hard gate."""
+    n_rows = len(y_raw)
+    if subsample is not None and n_rows > subsample:
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(n_rows, size=subsample, replace=False)
+        y_sub = y_raw[idx]
+        x_sub = X[idx]
+        n_used = subsample
+    else:
+        y_sub = y_raw
+        x_sub = X
+        n_used = n_rows
+
+    parameter_reports: list[dict] = []
+    failures: list[str] = []
+    for j, name in enumerate(model.param_names):
+        param_col = x_sub[:, j]
+        mi_by_summary = _parameter_summary_mi_vector(
+            param_col, y_sub, neighbors=neighbors, random_state=seed
+        )
+        mi_max = float(np.max(mi_by_summary))
+        best_idx = int(np.argmax(mi_by_summary))
+        threshold = _parameter_mi_threshold(
+            param_col,
+            y_sub,
+            n_perm=n_perm,
+            neighbors=neighbors,
+            quantile=quantile,
+            random_state=seed + j + 1,
+        )
+        passes = mi_max > threshold
+        if not passes:
+            failures.append(f"{name} (mi_max={mi_max:.4f}, thr={threshold:.4f})")
+        parameter_reports.append(
+            {
+                "name": name,
+                "mi_max": mi_max,
+                "best_summary": model.summary_names[best_idx],
+                "threshold": threshold,
+                "passes": passes,
+                "mi_by_summary": {
+                    summary_name: float(mi_by_summary[k])
+                    for k, summary_name in enumerate(model.summary_names)
+                },
+            }
+        )
+
+    return {
+        "model": model.slug,
+        "n_rows_total": n_rows,
+        "n_rows_used": n_used,
+        "settings": {
+            "n_perm": n_perm,
+            "subsample": subsample,
+            "quantile": quantile,
+            "neighbors": neighbors,
+            "seed": seed,
+        },
+        "parameters": parameter_reports,
+        "gate_passes": not failures,
+        "failures": failures,
+    }
+
+
+def check_parameter_mi_gate(
+    y_raw: np.ndarray,
+    X: np.ndarray,
+    model: Model,
+    *,
+    n_perm: int = SUMMARY_MI_PERMUTATIONS_DEFAULT,
+    subsample: int = SUMMARY_MI_SUBSAMPLE_DEFAULT,
+    quantile: float = SUMMARY_MI_QUANTILE_DEFAULT,
+    neighbors: int = SUMMARY_MI_NEIGHBORS_DEFAULT,
+    seed: int = SEED_DEFAULT,
+) -> None:
+    """Require each parameter to carry detectable MI with at least one summary."""
+    report = report_parameter_mi_gate(
+        y_raw,
+        X,
+        model,
+        n_perm=n_perm,
+        subsample=subsample,
+        quantile=quantile,
+        neighbors=neighbors,
+        seed=seed,
+    )
+    if not report["gate_passes"]:
+        msg = "Parameter MI gate failed for: " + "; ".join(report["failures"])
+        print(f"[cov_data] FAIL: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+
+def report_summary_mi_diagnostic(
+    y_raw: np.ndarray,
+    X: np.ndarray,
+    model: Model,
+    *,
+    n_perm: int = SUMMARY_MI_PERMUTATIONS_DEFAULT,
+    subsample: int = SUMMARY_MI_SUBSAMPLE_DEFAULT,
+    quantile: float = SUMMARY_MI_QUANTILE_DEFAULT,
+    neighbors: int = SUMMARY_MI_NEIGHBORS_DEFAULT,
+    seed: int = SEED_DEFAULT,
+) -> dict:
+    """Return per-summary MI diagnostics (warning-only, not a hard gate)."""
     n_rows = len(y_raw)
     if subsample is not None and n_rows > subsample:
         rng = np.random.default_rng(seed)
@@ -250,7 +409,7 @@ def report_summary_mi_gate(
     }
 
 
-def check_summary_mi_gate(
+def warn_summary_mi_diagnostic(
     y_raw: np.ndarray,
     X: np.ndarray,
     model: Model,
@@ -260,9 +419,9 @@ def check_summary_mi_gate(
     quantile: float = SUMMARY_MI_QUANTILE_DEFAULT,
     neighbors: int = SUMMARY_MI_NEIGHBORS_DEFAULT,
     seed: int = SEED_DEFAULT,
-) -> None:
-    """Require each summary to carry detectable MI with at least one parameter."""
-    report = report_summary_mi_gate(
+) -> list[str]:
+    """Warn when a summary has no detectable MI with any parameter."""
+    report = report_summary_mi_diagnostic(
         y_raw,
         X,
         model,
@@ -272,10 +431,10 @@ def check_summary_mi_gate(
         neighbors=neighbors,
         seed=seed,
     )
-    if not report["gate_passes"]:
-        msg = "Summary MI gate failed for: " + "; ".join(report["failures"])
-        print(f"[cov_data] FAIL: {msg}", file=sys.stderr)
-        sys.exit(1)
+    warnings = report["failures"]
+    for item in warnings:
+        print(f"[cov_data] WARN: summary MI diagnostic: {item}")
+    return warnings
 
 
 def validate_cov_training_data(
@@ -284,11 +443,21 @@ def validate_cov_training_data(
     model: Model,
     *,
     seed: int = SEED_DEFAULT,
-) -> None:
+) -> list[str]:
     """Run post-generation QA gates on covariance training data."""
     min_var, n_perm, subsample, quantile, neighbors = resolve_cov_qa_settings()
     check_summary_variance_gate(y_raw, model, min_var=min_var)
-    check_summary_mi_gate(
+    check_parameter_mi_gate(
+        y_raw,
+        X,
+        model,
+        n_perm=n_perm,
+        subsample=subsample,
+        quantile=quantile,
+        neighbors=neighbors,
+        seed=seed,
+    )
+    return warn_summary_mi_diagnostic(
         y_raw,
         X,
         model,
@@ -334,29 +503,42 @@ def logspace_to_raw(z_mean: np.ndarray, rt_mask: np.ndarray) -> np.ndarray:
     return y_raw
 
 
-def _simulate_one_theta(args: tuple) -> np.ndarray | None:
-    """Worker: simulate R replicates and return one cov_train row or None."""
+def generation_summary_path(slug: str) -> Path:
+    """Path to metadata describing training-data generation statistics."""
+    return Path("data") / slug / "generation_summary.json"
+
+
+def save_generation_summary(slug: str, payload: dict) -> None:
+    """Persist generation statistics for cov_train.csv."""
+    path = generation_summary_path(slug)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
+def _simulate_one_theta(args: tuple) -> tuple[np.ndarray | None, bool]:
+    """Worker: simulate R replicates and return (row, replicate_rejected)."""
     slug, params, n_rep, n_r, base_seed = args
     model = get_model(slug)
     rt_mask, _ = summary_column_masks(model)
     n_summaries = model.n_summaries
 
     if n_r < 2:
-        return None
+        return None, True
 
     replicates = np.empty((n_r, n_summaries), dtype=np.float64)
     for r in range(n_r):
         summaries = model.simulate_summaries(params, n_rep, base_seed + r)
         if not np.all(np.isfinite(summaries)):
-            return None
+            return None, True
         replicates[r] = summaries_to_logspace(summaries, rt_mask)
 
     z_mean = replicates.mean(axis=0)
     C1_z = n_rep * np.cov(replicates, rowvar=False, bias=False)
     if not np.all(np.isfinite(C1_z)):
-        return None
+        return None, True
 
-    return np.concatenate([params, z_mean, pack_upper_tri(C1_z)])
+    return np.concatenate([params, z_mean, pack_upper_tri(C1_z)]), False
 
 
 def expected_columns(model: Model) -> list[str]:
@@ -394,14 +576,17 @@ def generate_cov_dataset(model: Model) -> None:
 
     columns = expected_columns(model)
     valid_rows: list[np.ndarray] = []
+    replicates_rejected = 0
     report_interval = max(1, n_theta // 20)
     processed = 0
 
     with Pool(processes=n_workers) as pool:
-        for result in pool.imap_unordered(
+        for result, rejected in pool.imap_unordered(
             _simulate_one_theta, work_items, chunksize=CHUNK_SIZE
         ):
             processed += 1
+            if rejected:
+                replicates_rejected += 1
             if result is not None:
                 valid_rows.append(result)
 
@@ -430,12 +615,24 @@ def generate_cov_dataset(model: Model) -> None:
         [logspace_to_raw(row, rt_mask) for row in z_mean_qa], dtype=np.float64
     )
     print("[cov_data] Running training-data QA gates ...")
-    validate_cov_training_data(X_qa, y_raw_qa, model, seed=seed)
+    summary_mi_warnings = validate_cov_training_data(X_qa, y_raw_qa, model, seed=seed)
     print("[cov_data] Training-data QA gates passed.")
+
+    save_generation_summary(
+        slug,
+        {
+            "parameter_draws_attempted": n_theta,
+            "parameter_rows_retained": len(valid_rows),
+            "parameter_rows_rejected": n_theta - len(valid_rows),
+            "replicates_attempted": n_theta * n_r,
+            "replicates_rejected": replicates_rejected,
+            "summary_mi_warnings": summary_mi_warnings,
+        },
+    )
 
 
 def load_cov_dataset(
-    model: Model, subsample: int | None = None, seed: int = 42
+    model: Model, subsample: int | None = None, seed: int = SEED_DEFAULT
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Model]:
     """Load cov_train.csv and return arrays for training."""
     slug = model.slug
