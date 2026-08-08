@@ -1,9 +1,9 @@
 """
 Deffuant-Weisbuch bounded-confidence opinion dynamics for ASL.
 
-Canonical parameters epsilon (confidence bound) and mu (compromise rate) are
-mapped from logit inputs on training bounds epsilon in [0.12, 0.35] and
-mu in [0.08, 0.40]. Recovery uses uniform logit priors on [-4, 4].
+Parameters are inferred on the canonical scale: epsilon (confidence bound)
+and mu (compromise rate). Training draws are uniform on slightly wider
+supports than the JAGS priors and recovery true-parameter distribution.
 """
 
 from __future__ import annotations
@@ -12,15 +12,19 @@ import numpy as np
 
 from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
 from asl.spec import Model
+from models.social.dw_bounds import (
+    DW_PRIOR_BOUNDS,
+    DW_RECOVERY_PRIORS,
+    DW_TRAINING_BOUNDS,
+    PRIOR_EPSILON_BOUNDS,
+    PRIOR_MU_BOUNDS,
+    TRAINING_EPSILON_BOUNDS,
+    TRAINING_MU_BOUNDS,
+)
 
-PARAM_NAMES = ("logit_epsilon", "logit_mu")
-PARAM_BOUNDS = ((-4.0, 4.0), (-4.0, 4.0))
-PRIOR_PARAM_BOUNDS = PARAM_BOUNDS
-
-EPSILON_MIN = 0.12
-EPSILON_MAX = 0.35
-CANONICAL_MU_MIN = 0.08
-CANONICAL_MU_MAX = 0.40
+PARAM_NAMES = ("epsilon", "mu")
+PARAM_BOUNDS = DW_TRAINING_BOUNDS
+PRIOR_PARAM_BOUNDS = DW_PRIOR_BOUNDS
 
 SUMMARY_NAMES = (
     "effective_clusters_final",
@@ -76,7 +80,7 @@ def _run_interactions(
 
 
 def _is_degenerate_run(waves: list[np.ndarray], mu: float) -> bool:
-    if mu < CANONICAL_MU_MIN:
+    if mu < TRAINING_MU_BOUNDS[0]:
         return False
     total_movement = 0.0
     for left, right in zip(waves[:-1], waves[1:]):
@@ -132,35 +136,23 @@ def _summaries_from_waves(waves: list[np.ndarray]) -> np.ndarray:
     )
 
 
-def _sigmoid(x: float) -> float:
-    return float(1.0 / (1.0 + np.exp(-x)))
-
-
-def _to_epsilon_mu(logit_epsilon: float, logit_mu: float) -> tuple[float, float]:
-    epsilon = EPSILON_MIN + (EPSILON_MAX - EPSILON_MIN) * _sigmoid(logit_epsilon)
-    mu = CANONICAL_MU_MIN + (CANONICAL_MU_MAX - CANONICAL_MU_MIN) * _sigmoid(logit_mu)
-    return epsilon, mu
+def draw_cov_parameters(rng: np.random.Generator) -> np.ndarray:
+    """Uniform draws on the canonical training support."""
+    return np.array(
+        [
+            rng.uniform(*TRAINING_EPSILON_BOUNDS),
+            rng.uniform(*TRAINING_MU_BOUNDS),
+        ],
+        dtype=np.float64,
+    )
 
 
 def to_canonical(params: np.ndarray) -> tuple[float, float]:
-    return _to_epsilon_mu(float(params[0]), float(params[1]))
-
-
-def logit_array_to_canonical(params: np.ndarray) -> np.ndarray:
-    """Map (n, 2) logit parameters to canonical (epsilon, mu)."""
-    arr = np.asarray(params, dtype=np.float64)
-    if arr.ndim == 1:
-        arr = arr.reshape(1, -1)
-    logit_eps = arr[:, 0]
-    logit_mu = arr[:, 1]
-    epsilon = EPSILON_MIN + (EPSILON_MAX - EPSILON_MIN) / (1.0 + np.exp(-logit_eps))
-    mu = CANONICAL_MU_MIN + (CANONICAL_MU_MAX - CANONICAL_MU_MIN) / (1.0 + np.exp(-logit_mu))
-    return np.column_stack([epsilon, mu])
+    return float(params[0]), float(params[1])
 
 
 def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
-    logit_epsilon, logit_mu = map(float, params)
-    epsilon, mu = _to_epsilon_mu(logit_epsilon, logit_mu)
+    epsilon, mu = map(float, params)
     if n_trials < N_AGENTS:
         return np.full(N_SUMMARIES, np.nan)
 
@@ -174,10 +166,7 @@ def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarr
     return summaries
 
 
-RECOVERY_PRIORS = {
-    "logit_epsilon": "logit_epsilon ~ dunif(-4, 4)",
-    "logit_mu": "logit_mu ~ dunif(-4, 4)",
-}
+RECOVERY_PRIORS = DW_RECOVERY_PRIORS
 
 
 def build_jags_likelihood(obs: dict) -> list[str]:
@@ -194,7 +183,8 @@ DW = Model(
     summary_transforms=SUMMARY_TRANSFORMS,
     emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
     simulate_summaries=simulate_summaries,
+    draw_cov_parameters=draw_cov_parameters,
     recovery_priors=RECOVERY_PRIORS,
     build_jags_likelihood=build_jags_likelihood,
-    default_architecture="DeepWide_128x6",
+    default_architecture="DeepWide_32x6",
 )

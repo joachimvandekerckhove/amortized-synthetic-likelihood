@@ -5,35 +5,21 @@ from __future__ import annotations
 import numpy as np
 
 from models.social.dw import (
-    CANONICAL_MU_MAX,
-    CANONICAL_MU_MIN,
     DW,
-    EPSILON_MAX,
-    EPSILON_MIN,
     N_SUMMARIES,
     PARAM_NAMES,
+    PRIOR_EPSILON_BOUNDS,
+    PRIOR_MU_BOUNDS,
     SUMMARY_NAMES,
-    _to_epsilon_mu,
+    TRAINING_EPSILON_BOUNDS,
+    TRAINING_MU_BOUNDS,
+    draw_cov_parameters,
     simulate_summaries,
     to_canonical,
 )
 
 
-def _logit_from_unit(u: float) -> float:
-    u = float(np.clip(u, 1e-6, 1.0 - 1e-6))
-    return float(np.log(u / (1.0 - u)))
-
-
-def _canonical_params(epsilon: float, mu: float) -> np.ndarray:
-    frac_eps = (epsilon - EPSILON_MIN) / (EPSILON_MAX - EPSILON_MIN)
-    frac_mu = (mu - CANONICAL_MU_MIN) / (CANONICAL_MU_MAX - CANONICAL_MU_MIN)
-    return np.array(
-        [_logit_from_unit(frac_eps), _logit_from_unit(frac_mu)],
-        dtype=np.float64,
-    )
-
-
-INTERIOR_PARAMS = _canonical_params(0.22, 0.20)
+INTERIOR_PARAMS = np.array([0.22, 0.20], dtype=np.float64)
 
 
 class TestSimulator:
@@ -49,12 +35,12 @@ class TestSimulator:
 
     def test_epsilon_decreases_effective_clusters(self):
         low_eps = simulate_summaries(
-            _canonical_params(EPSILON_MIN + 0.02, 0.20),
+            np.array([TRAINING_EPSILON_BOUNDS[0] + 0.02, 0.20]),
             n_trials=12000,
             seed=23,
         )
         high_eps = simulate_summaries(
-            _canonical_params(EPSILON_MAX - 0.02, 0.20),
+            np.array([TRAINING_EPSILON_BOUNDS[1] - 0.02, 0.20]),
             n_trials=12000,
             seed=23,
         )
@@ -64,12 +50,12 @@ class TestSimulator:
 
     def test_mu_increases_large_move_fraction(self):
         low_mu = simulate_summaries(
-            _canonical_params(0.22, CANONICAL_MU_MIN + 0.02),
+            np.array([0.22, TRAINING_MU_BOUNDS[0] + 0.02]),
             n_trials=12000,
             seed=31,
         )
         high_mu = simulate_summaries(
-            _canonical_params(0.22, CANONICAL_MU_MAX - 0.02),
+            np.array([0.22, TRAINING_MU_BOUNDS[1] - 0.02]),
             n_trials=12000,
             seed=31,
         )
@@ -79,12 +65,12 @@ class TestSimulator:
 
     def test_mu_affects_temporal_summaries(self):
         low_mu = simulate_summaries(
-            _canonical_params(0.22, CANONICAL_MU_MIN),
+            np.array([0.22, TRAINING_MU_BOUNDS[0]]),
             n_trials=12000,
             seed=37,
         )
         high_mu = simulate_summaries(
-            _canonical_params(0.22, CANONICAL_MU_MAX - 0.02),
+            np.array([0.22, TRAINING_MU_BOUNDS[1] - 0.02]),
             n_trials=12000,
             seed=37,
         )
@@ -98,16 +84,11 @@ class TestSimulator:
 
 
 class TestCanonicalTransform:
-    def test_to_canonical_round_trip(self):
-        params = _canonical_params(0.22, 0.20)
+    def test_to_canonical_is_identity(self):
+        params = np.array([0.22, 0.20])
         epsilon, mu = to_canonical(params)
-        assert abs(epsilon - 0.22) < 1e-6
-        assert abs(mu - 0.20) < 1e-6
-
-    def test_to_epsilon_mu_matches_sigmoid_bounds(self):
-        epsilon, mu = _to_epsilon_mu(0.0, 0.0)
-        assert EPSILON_MIN < epsilon < EPSILON_MAX
-        assert CANONICAL_MU_MIN < mu < CANONICAL_MU_MAX
+        assert abs(epsilon - 0.22) < 1e-12
+        assert abs(mu - 0.20) < 1e-12
 
 
 class TestModelSpec:
@@ -117,7 +98,9 @@ class TestModelSpec:
         assert DW.n_outputs == 27
         assert DW.supports_recovery()
         assert DW.slug == "dw"
-        assert DW.default_architecture == "DeepWide_128x6"
+        assert DW.default_architecture == "DeepWide_32x6"
+        assert DW.param_bounds == (TRAINING_EPSILON_BOUNDS, TRAINING_MU_BOUNDS)
+        assert DW.prior_bounds == (PRIOR_EPSILON_BOUNDS, PRIOR_MU_BOUNDS)
         assert DW.summary_transforms == (
             "log1p",
             "log1p",
@@ -126,3 +109,16 @@ class TestModelSpec:
             "log1p",
             "identity",
         )
+
+    def test_draw_cov_parameters_within_training_bounds(self):
+        rng = np.random.default_rng(0)
+        for _ in range(50):
+            params = draw_cov_parameters(rng)
+            assert TRAINING_EPSILON_BOUNDS[0] <= params[0] <= TRAINING_EPSILON_BOUNDS[1]
+            assert TRAINING_MU_BOUNDS[0] <= params[1] <= TRAINING_MU_BOUNDS[1]
+
+    def test_recovery_priors_match_inference_bounds(self):
+        assert "0.15" in DW.recovery_priors["epsilon"]
+        assert "0.35" in DW.recovery_priors["epsilon"]
+        assert "0.1" in DW.recovery_priors["mu"]
+        assert "0.4" in DW.recovery_priors["mu"]
