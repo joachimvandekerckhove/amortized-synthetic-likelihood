@@ -117,10 +117,15 @@ def resolve_true_param_bounds(model: Model) -> tuple[tuple[float, float], ...]:
     return tuple(bounds)
 
 
-def draw_from_prior(model: Model, rng: np.random.Generator) -> np.ndarray:
-    """Draw one parameter vector from the JAGS inference prior."""
+def draw_from_prior(
+    model: Model,
+    rng: np.random.Generator,
+    bounds: tuple[tuple[float, float], ...] | None = None,
+) -> np.ndarray:
+    """Draw one parameter vector within bounds using the model's prior family."""
+    draw_bounds = bounds or model.prior_bounds
     params = np.empty(model.n_params)
-    for i, (name, (lo, hi)) in enumerate(zip(model.param_names, model.prior_bounds)):
+    for i, (name, (lo, hi)) in enumerate(zip(model.param_names, draw_bounds)):
         prior_line = model.recovery_priors.get(name, "")
         if "dnorm" in prior_line:
             sigma = (hi - lo) / 4.0
@@ -164,6 +169,17 @@ def compute_chain_initial_values(model: Model, rng_seed: int) -> list[dict]:
     return inits
 
 
+def report_param_bounds(
+    model: Model, bounds: tuple[tuple[float, float], ...]
+) -> tuple[tuple[float, float], ...]:
+    """Map parameter bounds to the scale used in recovery reports."""
+    if model.report_params_fn is None:
+        return bounds
+
+    reported = model.report_params_fn(np.asarray(bounds, dtype=np.float64))
+    return tuple((float(lo), float(hi)) for lo, hi in reported)
+
+
 def recovery_reporting_arrays(
     model: Model,
     true_params: np.ndarray,
@@ -182,7 +198,7 @@ def recovery_reporting_arrays(
     lo_report = model.report_params_fn(ci_lower)
     hi_report = model.report_params_fn(ci_upper)
     names = model.report_param_names or model.param_names
-    bounds = model.report_prior_bounds or true_draw_bounds or model.prior_bounds
+    bounds = report_param_bounds(model, true_draw_bounds or model.prior_bounds)
     return true_report, est_report, lo_report, hi_report, names, bounds
 
 
@@ -284,9 +300,10 @@ def _recover_one_subject(args: tuple) -> dict:
     rng = np.random.default_rng(rng_seed)
     max_retries = int(settings["max_retries_per_subject"])
     last_result: dict = {"status": "failed", "reason": "exhausted_retries"}
+    true_draw_bounds = settings.get("true_draw_bounds", model.prior_bounds)
 
     for retry in range(max_retries):
-        true_params = draw_from_prior(model, rng)
+        true_params = draw_from_prior(model, rng, true_draw_bounds)
         subj_seed = 1000 + subj_idx + retry * 100_000
         result = _recover_one_subject_attempt(slug, true_params, subj_seed, settings)
         if result["status"] == "converged":
@@ -352,7 +369,9 @@ def run_recovery_study(model: Model) -> None:
     print(f"[recovery] Model: {slug}")
     print(f"[recovery] Settings: {settings}")
     true_draw_bounds = resolve_true_param_bounds(model)
-    print(f"[recovery] True-parameter draws: inference prior via draw_from_prior()")
+    settings["true_draw_bounds"] = true_draw_bounds
+    print(f"[recovery] True-parameter draw bounds: {true_draw_bounds}")
+    print("[recovery] True-parameter distribution: model prior family")
     print("[recovery] Chain inits: uniform on per-parameter IQR of prior bounds")
 
     n_chains = settings["n_chains"]
@@ -445,7 +464,8 @@ def run_recovery_study(model: Model) -> None:
         results_dir,
         true_draw_bounds=report_draw_bounds,
         param_names=report_names,
-        inference_bounds=report_draw_bounds,
+        inference_bounds=model.report_prior_bounds
+        or report_param_bounds(model, model.prior_bounds),
     )
     print(f"[recovery] Per-subject arrays: {subjects_path}")
 

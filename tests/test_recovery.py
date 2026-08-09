@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from asl.recovery import (
     COVERAGE_HI,
     COVERAGE_LO,
     N_CHAINS,
+    _recover_one_subject,
     check_coverage_gate,
     compute_chain_initial_values,
     format_recovery_progress,
@@ -89,6 +91,29 @@ class TestChainInitialValues:
         a = compute_chain_initial_values(toy_model, rng_seed=7)
         b = compute_chain_initial_values(toy_model, rng_seed=7)
         assert a == b
+
+
+class TestRecoveryTrueDrawBounds:
+    def test_worker_draws_true_parameters_from_configured_bounds(
+        self, toy_model, monkeypatch
+    ):
+        monkeypatch.setattr("asl.recovery.get_model", lambda slug: toy_model)
+        monkeypatch.setattr(
+            "asl.recovery._recover_one_subject_attempt",
+            lambda slug, params, seed, settings: {
+                "status": "converged",
+                "true_params": params,
+            },
+        )
+        settings = {
+            "max_retries_per_subject": 1,
+            "true_draw_bounds": ((9.0, 10.0), (19.0, 20.0)),
+        }
+
+        result = _recover_one_subject(("toy", 0, 1, settings))
+
+        np.testing.assert_array_less([9.0, 19.0], result["true_params"])
+        np.testing.assert_array_less(result["true_params"], [10.0, 20.0])
 
 
 class TestRunRecoveryStudy:
