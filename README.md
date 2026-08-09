@@ -108,10 +108,10 @@ running a model-specific pipeline.
 | `training_epochs` | 25,000 |
 | `batch_size` | 4,096 |
 | `parameter_draws` (training data) | 20,000 |
-| `trials_per_replicate` | 600 |
-| `replicates_per_parameter` | 120 |
+| `trials_per_replicate` | 600 (`dw`: 150 via `configs/dw.toml`) |
+| `replicates_per_parameter` | 120 (`dw`: 1000) |
 | `synthetic_subjects` (recovery) | 500 |
-| `trials_per_subject` (recovery) | 500 (`dw`: 600 via `configs/dw.toml`) |
+| `trials_per_subject` (recovery) | 500 (`dw`: 150 via `configs/dw.toml`) |
 
 `make dw` layers `configs/dw.toml` (R=1000 replicates, DeepWide\_32x6,
 lr=0.0003, batch 512).
@@ -223,7 +223,7 @@ make dw
 Inference:
 
 ```
-obs[1:6] ~ dw_sl(epsilon, mu, n_trials)
+obs[1:6] ~ dw_sl(logit_epsilon, logit_mu, n_agents)
 ```
 
 Expected emulator accuracy (reference machine):
@@ -242,16 +242,17 @@ Expected recovery (MCMC is stochastic; expect small differences across machines)
 
 | Parameter | Correlation | 95% CI coverage |
 |---|---|---|
-| epsilon | (rerun pending) | (rerun pending) |
-| mu | (rerun pending) | (rerun pending) |
+| epsilon | 0.987 | 0.956 |
+| mu | 0.968 | 0.950 |
 
 Recovery infers logit-scale parameters and reports coverage on canonical
 epsilon and mu after the logistic sigmoid map.
 
 ## 5. Coverage gates
 
-Training-data generation applies a **parameter MI gate**: each parameter must
-carry detectable mutual information with at least one summary. Summaries with
+Training-data generation applies a **parameter MI gate** (unless disabled via
+`cov_data.parameter_mi_gate = false`): each parameter must carry detectable
+mutual information with the **full summary vector jointly**. Summaries with
 no associated parameter produce a warning only.
 
 Emulator training gates on **held-out validation R²** (`val_r2` in

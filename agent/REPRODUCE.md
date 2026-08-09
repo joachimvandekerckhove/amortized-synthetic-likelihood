@@ -190,12 +190,13 @@ Rules:
 | `ddmcollapsesig` | DeepWide_32x6 | yes (`data/ddmcollapsesig/`) |
 | `dw` | DeepWide_32x6 | yes (`data/dw/`) |
 
-**`dw` parameterization (canonical uniform).** Training draws use
-`epsilon ~ Unif(0.125, 0.375)` and `mu ~ Unif(0.075, 0.425)`; JAGS priors
-and recovery true values use `epsilon ~ Unif(0.15, 0.35)` and
-`mu ~ Unif(0.1, 0.4)`. See `models/social/dw_bounds.py` and `configs/dw.toml`
-(R=1000 replicates per parameter draw). To regenerate training data from
-scratch, run `make -C scripts/dw clean` then `make -C scripts/dw all`.
+**`dw` parameterization (logit inference).** Training draws use the logit
+images of `epsilon ~ Unif(0.125, 0.375)` and `mu ~ Unif(0.075, 0.425)`.
+JAGS priors and recovery true values use the logit images of
+`epsilon ~ Unif(0.15, 0.35)` and `mu ~ Unif(0.1, 0.4)`. Recovery results are
+reported on the canonical scale. See `models/social/dw_bounds.py` and
+`configs/dw.toml` (R=1000 replicates per parameter draw). To regenerate DW
+training data, run `make -C scripts/dw regenerate-data`.
 
 Training data generation (`make -C scripts/MODEL regenerate-data`) is optional
 when `data/MODEL/cov_train.csv` already exists. Skip it unless I ask to
@@ -222,10 +223,10 @@ make -C scripts/MODEL wire-to-jags
 make -C scripts/MODEL confirm-recovery
 ```
 
-If a previous partial run left corrupt artifacts, clean first:
+If a previous partial run left corrupt generated artifacts, clean them first:
 
 ```bash
-make -C scripts/MODEL clean
+make -C scripts/MODEL clean-generated
 make -C scripts/MODEL all
 ```
 
@@ -302,12 +303,12 @@ comparable, not identical):
 | k | 0.958 | 0.940 |
 | t0 | 0.994 | 0.962 |
 
-**dw** (canonical uniform parameters; `DeepWide_32x6`, R=1000)
+**dw** (canonical reported parameters; `DeepWide_32x6`, R=1000)
 
 | Parameter | Correlation | Coverage |
 |---|---|---|
-| epsilon | 0.985 | 0.96 |
-| mu | 0.949 | 0.972 |
+| epsilon | 0.987 | 0.956 |
+| mu | 0.968 | 0.950 |
 
 ### Diagnostic plot
 
@@ -315,20 +316,21 @@ comparable, not identical):
 multipanel plot). `results/MODEL/recovery_subjects.json` stores per-subject true,
 estimated, CI, and R-hat arrays for paper figure scripts.
 
-### N-stability (DDM models only)
+### N-stability (all models)
 
 After `train-emulator` completes (`model.onnx` and `target_transform.pkl` exist):
 
 ```bash
-make -C scripts/ddm3 evaluate-n-stability
+make -C scripts/MODEL evaluate-n-stability
 ```
 
-Same target exists for `ddm4` and `ddmcollapsesig`. Outputs land in
+The DDM models use trial count `N`. DW uses the number of agents and evaluates
+a fixed profile of canonical `(epsilon, mu)` pairs. Outputs land in
 `results/MODEL/n_stability_summary.json`, `n_stability_table.tex`, and
 `n_stability_plot_data.npz`. Use `--quick` for a smoke run:
 
 ```bash
-python scripts/evaluate_n_stability.py --slug ddm3 --quick
+python scripts/evaluate_n_stability.py --slug MODEL --quick
 ```
 
 Remove cached batches before a full rerun:
