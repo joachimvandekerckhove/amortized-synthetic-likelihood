@@ -303,7 +303,8 @@ agent/                              AI agent prompts (optional)
 ```
 
 Running the pipeline also produces `results/`, `models/*.jnnx/`, and
-`figures/` (all gitignored).
+`figures/`. Most are gitignored; the N-stability summaries, tables, and plot
+data under `results/<model>/` are committed.
 
 ## 8. Cleaning artifacts
 

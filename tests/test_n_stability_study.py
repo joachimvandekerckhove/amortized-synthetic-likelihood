@@ -85,6 +85,7 @@ class TestCheckpointValidation:
             "n_replicates": np.array(10),
             "n_size": np.array(50),
             "batch_key": np.array("50"),
+            "target_transform_sha256": np.array("source-transform"),
             "params": np.array([[0.1, 0.2], [0.3, 0.4]]),
         }
 
@@ -94,4 +95,5 @@ class TestCheckpointValidation:
             np.array([[0.1, 0.2], [0.5, 0.6]]),
             "50",
             50,
+            "other-transform",
         )

@@ -28,10 +28,8 @@ $(JNNX_DIR)/model.onnx: $(ONNX) $(TRANSFORM)
 $(RECOVERY): $(JNNX_DIR)/model.onnx
 	$(ENV) $(PY) $(RUN) confirm-recovery
 
-$(N_STABILITY): $(ONNX) $(TRANSFORM)
+evaluate-n-stability: $(ONNX) $(TRANSFORM)
 	$(ENV) $(PY) $(ROOT)/scripts/evaluate_n_stability.py --slug $(MODEL)
-
-evaluate-n-stability: $(N_STABILITY)
 
 .PHONY: generate-data train-emulator wire-to-jags confirm-recovery \
         evaluate-n-stability regenerate-data retrain rewire rerun-recovery \
