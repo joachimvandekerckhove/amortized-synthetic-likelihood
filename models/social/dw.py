@@ -57,7 +57,7 @@ MOVE_THRESHOLD = 0.15
 
 # Fixed canonical (epsilon, mu) pairs for the DW N-stability study.
 DW_STUDY_CANONICAL_THETAS = (
-    (0.20, 0.20),
+    (0.25, 0.35),
     (0.25, 0.25),
     (0.30, 0.30),
     (0.20, 0.35),

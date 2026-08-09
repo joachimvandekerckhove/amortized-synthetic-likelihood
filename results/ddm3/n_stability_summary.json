@@ -5,6 +5,7 @@
   "n_replicates": 500,
   "reference_n": 600,
   "null_key": "600_null",
+  "sample_size_label": "N",
   "summary_names": [
     "acc",
     "rt_mean",
@@ -13,7 +14,7 @@
   "chi2_p95": 7.814727903251179,
   "batches": {
     "50": {
-      "n_trials": 50,
+      "n_size": 50,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -94,7 +95,7 @@
       }
     },
     "100": {
-      "n_trials": 100,
+      "n_size": 100,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -175,7 +176,7 @@
       }
     },
     "300": {
-      "n_trials": 300,
+      "n_size": 300,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -256,7 +257,7 @@
       }
     },
     "600": {
-      "n_trials": 600,
+      "n_size": 600,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -337,7 +338,7 @@
       }
     },
     "1000": {
-      "n_trials": 1000,
+      "n_size": 1000,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -418,7 +419,7 @@
       }
     },
     "600_null": {
-      "n_trials": 600,
+      "n_size": 600,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {

@@ -5,6 +5,7 @@
   "n_replicates": 500,
   "reference_n": 600,
   "null_key": "600_null",
+  "sample_size_label": "N",
   "summary_names": [
     "acc",
     "rt_q10",
@@ -14,7 +15,7 @@
   "chi2_p95": 9.487729036781154,
   "batches": {
     "50": {
-      "n_trials": 50,
+      "n_size": 50,
       "n_ok": 200,
       "n_failed_replicates": 1407,
       "covariance_vs_ref": {
@@ -69,9 +70,9 @@
       },
       "mahalanobis": {
         "n_obs": 98593,
-        "mean_d2_over_p": 1.0563139460411886,
-        "median_d2_over_p": 0.8013245823910571,
-        "coverage_95": 0.9239905469962371
+        "mean_d2_over_p": 0.9713688159537519,
+        "median_d2_over_p": 0.7295535174443857,
+        "coverage_95": 0.9361820818922236
       },
       "mean_shift_vs_ref": {
         "n_valid": 200,
@@ -105,7 +106,7 @@
       }
     },
     "100": {
-      "n_trials": 100,
+      "n_size": 100,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -160,9 +161,9 @@
       },
       "mahalanobis": {
         "n_obs": 100000,
-        "mean_d2_over_p": 0.9985657078599119,
-        "median_d2_over_p": 0.7918600884329947,
-        "coverage_95": 0.9391
+        "mean_d2_over_p": 0.9025259259529181,
+        "median_d2_over_p": 0.7012381249312276,
+        "coverage_95": 0.9521
       },
       "mean_shift_vs_ref": {
         "n_valid": 200,
@@ -196,7 +197,7 @@
       }
     },
     "300": {
-      "n_trials": 300,
+      "n_size": 300,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -251,9 +252,9 @@
       },
       "mahalanobis": {
         "n_obs": 100000,
-        "mean_d2_over_p": 0.9293906594219059,
-        "median_d2_over_p": 0.7455559343794078,
-        "coverage_95": 0.95142
+        "mean_d2_over_p": 0.8164363309347117,
+        "median_d2_over_p": 0.6423616175246789,
+        "coverage_95": 0.96868
       },
       "mean_shift_vs_ref": {
         "n_valid": 200,
@@ -287,7 +288,7 @@
       }
     },
     "600": {
-      "n_trials": 600,
+      "n_size": 600,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -342,9 +343,9 @@
       },
       "mahalanobis": {
         "n_obs": 100000,
-        "mean_d2_over_p": 0.9015669498532826,
-        "median_d2_over_p": 0.7129726234829554,
-        "coverage_95": 0.95107
+        "mean_d2_over_p": 0.7785848921383955,
+        "median_d2_over_p": 0.6070802764130255,
+        "coverage_95": 0.97253
       },
       "mean_shift_vs_ref": {
         "n_valid": 200,
@@ -378,7 +379,7 @@
       }
     },
     "1000": {
-      "n_trials": 1000,
+      "n_size": 1000,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -433,9 +434,9 @@
       },
       "mahalanobis": {
         "n_obs": 100000,
-        "mean_d2_over_p": 0.8833941116221408,
-        "median_d2_over_p": 0.6819431552818205,
-        "coverage_95": 0.94892
+        "mean_d2_over_p": 0.7486063545551719,
+        "median_d2_over_p": 0.5738505250216963,
+        "coverage_95": 0.97487
       },
       "mean_shift_vs_ref": {
         "n_valid": 200,
@@ -469,7 +470,7 @@
       }
     },
     "600_null": {
-      "n_trials": 600,
+      "n_size": 600,
       "n_ok": 200,
       "n_failed_replicates": 0,
       "covariance_vs_ref": {
@@ -524,9 +525,9 @@
       },
       "mahalanobis": {
         "n_obs": 100000,
-        "mean_d2_over_p": 0.9016351564225709,
-        "median_d2_over_p": 0.7120588934507172,
-        "coverage_95": 0.95114
+        "mean_d2_over_p": 0.7758834233626429,
+        "median_d2_over_p": 0.6054190494093351,
+        "coverage_95": 0.97287
       },
       "mean_shift_vs_ref": {
         "n_valid": 200,

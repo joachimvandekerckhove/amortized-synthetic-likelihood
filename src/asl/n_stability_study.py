@@ -40,6 +40,7 @@ from asl.spec import Model
 from models.catalog import get_model
 
 SUPPORTED_SLUGS = ("ddm3", "ddm4", "ddmcollapsesig", "dw")
+MAX_PROFILE_REPLACEMENT_ATTEMPTS = 20
 
 
 @dataclass(frozen=True)
@@ -158,17 +159,24 @@ def build_config(args: argparse.Namespace) -> StudyConfig:
     )
 
 
-def draw_fixed_thetas(model: Model, n_theta: int, seed: int, profile: SlugProfile) -> np.ndarray:
-    if profile.theta_mode == "fixed_dw":
-        from models.social.dw import study_logit_thetas
-
-        return study_logit_thetas(n_theta)
-
+def draw_random_thetas(model: Model, n_theta: int, seed: int) -> np.ndarray:
+    """Draw deterministic parameter vectors from the training support."""
     rng = np.random.default_rng(seed)
     params = np.empty((n_theta, model.n_params), dtype=np.float64)
     for i, (lo, hi) in enumerate(model.param_bounds):
         params[:, i] = rng.uniform(lo, hi, size=n_theta)
     return params
+
+
+def draw_fixed_thetas(
+    model: Model, n_theta: int, seed: int, profile: SlugProfile
+) -> np.ndarray:
+    if profile.theta_mode == "fixed_dw":
+        from models.social.dw import study_logit_thetas
+
+        return study_logit_thetas(n_theta)
+
+    return draw_random_thetas(model, n_theta, seed)
 
 
 def stable_tag_code(batch_tag: str) -> int:
@@ -317,6 +325,106 @@ def run_batch(
     payload["batch_key"] = batch_key
     payload["n_size"] = n_size
     return payload
+
+
+def rerun_batch_points(
+    config: StudyConfig,
+    batch: dict,
+    params: np.ndarray,
+    batch_key: str,
+    n_size: int,
+    theta_indices: np.ndarray,
+    replacement_attempt: int,
+) -> None:
+    """Replace selected profile points in one cached batch."""
+    transform_path = str(config.results_dir / "target_transform.pkl")
+    work_items = [
+        (
+            config.slug,
+            int(theta_index),
+            params[theta_index],
+            n_size,
+            config.n_replicates,
+            batch_seed(
+                config.seed + replacement_attempt * 1_000_000_000,
+                batch_key,
+                int(theta_index),
+            ),
+            transform_path,
+        )
+        for theta_index in theta_indices
+    ]
+
+    with Pool(processes=config.workers) as pool:
+        for result in pool.imap_unordered(_simulate_theta_batch, work_items, chunksize=1):
+            idx = int(result["theta_index"])
+            batch["params"][idx] = params[idx]
+            batch["c1"][idx] = result["c1"]
+            batch["mean_std"][idx] = result["mean_std"]
+            batch["summaries_std"][idx] = result["summaries_std"]
+            batch["n_valid"][idx] = result["n_valid"]
+            batch["n_failed"][idx] = result["n_failed"]
+            batch["ok"][idx] = result["ok"]
+
+    np.savez_compressed(raw_checkpoint_path(config.results_dir, batch_key), **batch)
+
+
+def invalid_profile_indices(batches: dict[str, dict]) -> np.ndarray:
+    """Return profile indices invalid in at least one sample-size batch."""
+    valid = np.ones(len(next(iter(batches.values()))["ok"]), dtype=bool)
+    for batch in batches.values():
+        valid &= batch["ok"]
+    return np.flatnonzero(~valid)
+
+
+def replace_invalid_random_profile_points(
+    config: StudyConfig,
+    params: np.ndarray,
+    batches: dict[str, dict],
+) -> None:
+    """Resample random profile points until every batch has positive-definite C1."""
+    if config.profile.theta_mode != "random":
+        return
+
+    for attempt in range(1, MAX_PROFILE_REPLACEMENT_ATTEMPTS + 1):
+        invalid = invalid_profile_indices(batches)
+        if not len(invalid):
+            return
+
+        print(
+            f"[n_stability] Replacing {len(invalid)} invalid profile points "
+            f"(attempt {attempt}/{MAX_PROFILE_REPLACEMENT_ATTEMPTS})"
+        )
+        params[invalid] = draw_random_thetas(
+            config.model,
+            len(invalid),
+            config.seed + attempt * 10_007,
+        )
+        for n_size in config.profile.n_values:
+            rerun_batch_points(
+                config,
+                batches[str(n_size)],
+                params,
+                str(n_size),
+                n_size,
+                invalid,
+                attempt,
+            )
+        rerun_batch_points(
+            config,
+            batches[config.profile.null_key],
+            params,
+            config.profile.null_key,
+            config.profile.ref_n,
+            invalid,
+            attempt,
+        )
+
+    invalid = invalid_profile_indices(batches)
+    raise RuntimeError(
+        "Unable to replace all invalid N-stability profile points after "
+        f"{MAX_PROFILE_REPLACEMENT_ATTEMPTS} attempts: {invalid.tolist()}"
+    )
 
 
 def compare_to_reference(
@@ -501,6 +609,21 @@ def write_table_tex(summary: dict, path: Path, profile: SlugProfile) -> None:
     path.write_text("\n".join(lines), encoding="ascii")
 
 
+def check_complete_covariance_profile(batches: dict[str, dict]) -> None:
+    """Require positive-definite covariance estimates at every profile point."""
+    invalid = invalid_profile_indices(batches)
+    if len(invalid):
+        incomplete = [
+            f"{batch_key}: {np.flatnonzero(~batch['ok']).tolist()}"
+            for batch_key, batch in batches.items()
+            if not np.all(batch["ok"])
+        ]
+        raise RuntimeError(
+            "N-stability covariance profile is incomplete at indices "
+            f"{invalid.tolist()} ({'; '.join(incomplete)})"
+        )
+
+
 def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
     session = cpu_inference_session(config.results_dir / "model.onnx")
     sigma_emu = load_emulator_error_cov(config.slug)
@@ -608,6 +731,8 @@ def run_study(argv: list[str] | None = None) -> dict:
         config, params, profile.null_key, profile.ref_n
     )
 
+    replace_invalid_random_profile_points(config, params, batches)
+    check_complete_covariance_profile(batches)
     summary = aggregate_all(config, batches)
     print(f"[n_stability] Done ({config.slug}).")
     for key, block in summary["batches"].items():

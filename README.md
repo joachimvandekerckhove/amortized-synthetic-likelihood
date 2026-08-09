@@ -262,7 +262,24 @@ Each recovery study applies automated gates: at least **98%** of subjects must
 converge, and every parameter's empirical 95% CI coverage must fall in
 **(0.90, 0.99)**. The pipeline exits non-zero if any gate fails.
 
-## 6. Repository layout
+## 6. N-stability studies
+
+After an emulator has been trained, evaluate its single-unit covariance across
+sample sizes:
+
+```bash
+make -C scripts/ddm3 evaluate-n-stability
+make -C scripts/ddm4 evaluate-n-stability
+make -C scripts/ddmcollapsesig evaluate-n-stability
+make -C scripts/dw evaluate-n-stability
+```
+
+DDM studies interpret size as trial count `N`; DW interprets it as the number
+of agents and uses a fixed canonical `(epsilon, mu)` profile. Each study writes
+committed `n_stability_summary.json`, `n_stability_table.tex`, and
+`n_stability_plot_data.npz` files to `results/<model>/`.
+
+## 7. Repository layout
 
 ```
 asl.toml                            user overrides (edit this)
@@ -288,14 +305,14 @@ agent/                              AI agent prompts (optional)
 Running the pipeline also produces `results/`, `models/*.jnnx/`, and
 `figures/` (all gitignored).
 
-## 7. Cleaning artifacts
+## 8. Cleaning artifacts
 
 ```bash
 make -C scripts/ddm3 clean-generated   # remove gitignored outputs only
 make -C scripts/ddm3 clean               # also removes committed training data (prompts for confirmation)
 ```
 
-## 8. Tests
+## 9. Tests
 
 ```bash
 make preflight
