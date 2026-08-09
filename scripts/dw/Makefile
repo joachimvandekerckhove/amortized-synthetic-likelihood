@@ -10,7 +10,6 @@ TRANSFORM   := $(ROOT)/results/$(MODEL)/target_transform.pkl
 ONNX        := $(ROOT)/results/$(MODEL)/model.onnx
 JNNX_DIR    := $(ROOT)/models/$(MODEL).jnnx
 RECOVERY    := $(ROOT)/results/$(MODEL)/recovery_summary.json
-N_STABILITY := $(ROOT)/results/$(MODEL)/n_stability_summary.json
 
 .DEFAULT_GOAL := all
 
@@ -63,7 +62,7 @@ rerun-recovery:
 	rm -f $(RECOVERY)
 	$(MAKE) confirm-recovery
 
-reproduce: regenerate-data retrain rewire rerun-recovery
+reproduce: regenerate-data retrain rewire rerun-recovery evaluate-n-stability
 
 clean-generated:
 	rm -rf $(ROOT)/results/$(MODEL) \
