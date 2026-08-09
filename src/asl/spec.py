@@ -45,6 +45,7 @@ class Model:
     report_param_names: tuple[str, ...] | None = None
     report_params_fn: Callable[[np.ndarray], np.ndarray] | None = None
     report_prior_bounds: tuple[tuple[float, float], ...] | None = None
+    sample_size_arg: str = "n_trials"
 
     def __post_init__(self) -> None:
         if len(self.prior_bounds) != len(self.param_names):

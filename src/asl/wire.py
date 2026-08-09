@@ -76,7 +76,7 @@ def build_jnnx_package(model: Model, onnx_path: Path, package_dir: Path) -> None
             "summary_names": list(model.summary_names),
             "onnx_layout": "concatenated",
             "distribution_name": f"{model.slug}_sl",
-            "trial_count_arg": "n_trials",
+            "trial_count_arg": model.sample_size_arg,
             "include_sigma_emu": True,
         }
     with open(package_dir / "metadata.json", "w") as f:

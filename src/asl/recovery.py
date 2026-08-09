@@ -231,7 +231,7 @@ def _recover_one_subject_attempt(
     obs_raw = np.asarray(obs["obs"], dtype=np.float64)
     data = {
         "obs": obs_raw.tolist(),
-        "n_trials": settings["n_trials"],
+        model.sample_size_arg: settings["n_trials"],
     }
     inits = compute_chain_initial_values(model, subj_seed)
 
