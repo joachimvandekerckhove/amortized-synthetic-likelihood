@@ -69,3 +69,29 @@ class TestCovarianceProfileCoverage:
         invalid = n_stability_study.invalid_profile_indices(batches)
 
         np.testing.assert_array_equal(invalid, [1, 2])
+
+
+class TestCheckpointValidation:
+    def test_rejects_checkpoint_with_a_different_parameter_profile(self):
+        class Config:
+            slug = "ddm3"
+            seed = 1
+            n_theta = 2
+            n_replicates = 10
+
+        payload = {
+            "slug": np.array("ddm3"),
+            "seed": np.array(1),
+            "n_replicates": np.array(10),
+            "n_size": np.array(50),
+            "batch_key": np.array("50"),
+            "params": np.array([[0.1, 0.2], [0.3, 0.4]]),
+        }
+
+        assert not n_stability_study.checkpoint_matches_study(
+            payload,
+            Config(),
+            np.array([[0.1, 0.2], [0.5, 0.6]]),
+            "50",
+            50,
+        )

@@ -194,6 +194,28 @@ def raw_checkpoint_path(results_dir: Path, batch_key: str) -> Path:
     return results_dir / f"n_stability_raw_N{batch_key}.npz"
 
 
+def checkpoint_matches_study(
+    payload: dict,
+    config: StudyConfig,
+    params: np.ndarray,
+    batch_key: str,
+    n_size: int,
+) -> bool:
+    """Return whether a cached batch belongs to this exact study request."""
+    required = {"slug", "seed", "n_replicates", "n_size", "batch_key", "params"}
+    if not required.issubset(payload):
+        return False
+    return (
+        str(payload["slug"].item()) == config.slug
+        and int(payload["seed"].item()) == config.seed
+        and int(payload["n_replicates"].item()) == config.n_replicates
+        and int(payload["n_size"].item()) == n_size
+        and str(payload["batch_key"].item()) == batch_key
+        and payload["params"].shape == params.shape
+        and np.array_equal(payload["params"], params)
+    )
+
+
 def _simulate_theta_batch(args: tuple) -> dict:
     slug, theta_index, params, n_size, n_replicates, base_seed, transform_path = args
     model = get_model(slug)
@@ -249,12 +271,14 @@ def run_batch(
 ) -> dict:
     path = raw_checkpoint_path(config.results_dir, batch_key)
     if path.exists():
-        print(f"[n_stability] Loading checkpoint {path.name}")
         loaded = np.load(path, allow_pickle=False)
         payload = {key: loaded[key] for key in loaded.files}
-        payload["batch_key"] = batch_key
-        payload["n_size"] = n_size
-        return payload
+        if checkpoint_matches_study(payload, config, params, batch_key, n_size):
+            print(f"[n_stability] Loading checkpoint {path.name}")
+            payload["batch_key"] = batch_key
+            payload["n_size"] = n_size
+            return payload
+        print(f"[n_stability] Discarding stale checkpoint {path.name}")
 
     n_summaries = config.n_summaries
     transform_path = str(config.results_dir / "target_transform.pkl")
@@ -307,6 +331,7 @@ def run_batch(
                 )
 
     payload = {
+        "slug": np.array(config.slug),
         "params": params,
         "c1": c1,
         "mean_std": mean_std,
@@ -366,6 +391,7 @@ def rerun_batch_points(
             batch["n_failed"][idx] = result["n_failed"]
             batch["ok"][idx] = result["ok"]
 
+    batch["slug"] = np.array(config.slug)
     np.savez_compressed(raw_checkpoint_path(config.results_dir, batch_key), **batch)
 
 
