@@ -5,14 +5,18 @@ Inference uses logit-scale parameters mapped to the canonical (0, 1) range via
 the logistic sigmoid. Training and prior support are specified as canonical
 intervals in dw_bounds and converted to logit bounds; the transform itself does
 not bake in any affine limits.
+
+Sample size N is the number of agents. Pairwise interaction exposure is
+controlled separately via events_per_agent_per_interval.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from scipy.special import expit
+from scipy.special import expit, logit
 
 from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
+from asl.config import load_config
 from asl.spec import Model
 from models.social.dw_bounds import (
     CANONICAL_PARAM_NAMES,
@@ -45,10 +49,45 @@ N_SUMMARIES = len(SUMMARY_NAMES)
 
 SUMMARY_TRANSFORMS = ("log1p", "log1p", "log1p", "log1p", "log1p", "identity")
 
-N_AGENTS = 150
+DEFAULT_N_AGENTS = 150
+DEFAULT_EVENTS_PER_AGENT_PER_INTERVAL = 1.0
 N_WAVES = 5
 N_BINS = 20
 MOVE_THRESHOLD = 0.15
+
+# Fixed canonical (epsilon, mu) pairs for the DW N-stability study.
+DW_STUDY_CANONICAL_THETAS = (
+    (0.20, 0.20),
+    (0.25, 0.25),
+    (0.30, 0.30),
+    (0.20, 0.35),
+    (0.35, 0.20),
+)
+
+
+def resolve_events_per_agent_per_interval() -> float:
+    """Read interaction exposure from config or fall back to the paper default."""
+    config = load_config()
+    return float(
+        config.get(
+            "simulator",
+            "events_per_agent_per_interval",
+            DEFAULT_EVENTS_PER_AGENT_PER_INTERVAL,
+        )
+    )
+
+
+def events_per_interval_count(
+    n_agents: int,
+    events_per_agent_per_interval: float | None = None,
+) -> int:
+    """Pair-selection attempts per inter-wave interval."""
+    rate = (
+        events_per_agent_per_interval
+        if events_per_agent_per_interval is not None
+        else resolve_events_per_agent_per_interval()
+    )
+    return max(1, int(round(n_agents * rate)))
 
 
 def _bin_proportions(opinions: np.ndarray) -> np.ndarray:
@@ -91,14 +130,18 @@ def _run_interactions(
 def _simulate_opinion_waves(
     epsilon: float,
     mu: float,
-    n_trials: int,
+    n_agents: int,
     seed: int,
+    *,
+    events_per_agent_per_interval: float | None = None,
 ) -> list[np.ndarray] | None:
     n_intervals = N_WAVES - 1
-    events_per_interval = max(1, int(n_trials // n_intervals))
+    events_per_interval = events_per_interval_count(
+        n_agents, events_per_agent_per_interval
+    )
 
     rng = np.random.default_rng(seed + 3_000_007)
-    opinions = rng.uniform(0.0, 1.0, size=N_AGENTS).astype(np.float64)
+    opinions = rng.uniform(0.0, 1.0, size=n_agents).astype(np.float64)
     waves = [opinions.copy()]
 
     for _ in range(n_intervals):
@@ -145,6 +188,16 @@ def canonical_params_array(params: np.ndarray) -> np.ndarray:
     return expit(np.asarray(params, dtype=np.float64))
 
 
+def study_logit_thetas(n_theta: int) -> np.ndarray:
+    """Fixed canonical (epsilon, mu) values for the DW N-stability study."""
+    canonical = np.asarray(DW_STUDY_CANONICAL_THETAS, dtype=np.float64)
+    logits = logit(canonical)
+    if n_theta <= len(logits):
+        return logits[:n_theta]
+    reps = int(np.ceil(n_theta / len(logits)))
+    return np.tile(logits, (reps, 1))[:n_theta]
+
+
 def draw_cov_parameters(rng: np.random.Generator) -> np.ndarray:
     """Uniform draws on the logit training support."""
     return np.array(
@@ -156,12 +209,12 @@ def draw_cov_parameters(rng: np.random.Generator) -> np.ndarray:
     )
 
 
-def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
+def simulate_summaries(params: np.ndarray, n_agents: int, seed: int) -> np.ndarray:
     epsilon, mu = to_canonical(params)
-    if n_trials < N_AGENTS:
+    if n_agents < 2:
         return np.full(N_SUMMARIES, np.nan)
 
-    waves = _simulate_opinion_waves(epsilon, mu, n_trials, seed)
+    waves = _simulate_opinion_waves(epsilon, mu, n_agents, seed)
     summaries = _summaries_from_waves(waves)
     if not np.all(np.isfinite(summaries)):
         return np.full(N_SUMMARIES, np.nan)
@@ -173,7 +226,9 @@ RECOVERY_PRIORS = DW_RECOVERY_PRIORS
 
 def build_jags_likelihood(obs: dict) -> list[str]:
     del obs
-    return build_sl_likelihood_line("dw", PARAM_NAMES, N_SUMMARIES)
+    return build_sl_likelihood_line(
+        "dw", PARAM_NAMES, N_SUMMARIES, n_trials_name="n_agents"
+    )
 
 
 DW = Model(
@@ -192,4 +247,5 @@ DW = Model(
     report_param_names=CANONICAL_PARAM_NAMES,
     report_params_fn=canonical_params_array,
     report_prior_bounds=DW_PRIOR_BOUNDS,
+    sample_size_arg="n_agents",
 )

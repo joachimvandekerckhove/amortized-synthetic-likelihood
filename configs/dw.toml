@@ -1,9 +1,12 @@
 # DW (Deffuant-Weisbuch) paper pipeline overrides.
 # Used by: make -C scripts/dw all
 
+[simulator]
+events_per_agent_per_interval = 1.0
+
 [cov_data]
 replicates_per_parameter = 1000
-trials_per_replicate = 600
+trials_per_replicate = 150
 
 [training]
 architecture = "DeepWide_32x6"
@@ -13,5 +16,5 @@ batch_size = 512
 mean_r2_threshold = 0.995
 
 [recovery]
-trials_per_subject = 600
+trials_per_subject = 150
 parallel_workers = 7
