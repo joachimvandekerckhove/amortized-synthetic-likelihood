@@ -14,6 +14,7 @@ trials_per_replicate = 600
 replicates_per_parameter = 120
 random_seed = 1
 min_summary_variance = 1.0e-12
+parameter_mi_gate = true
 summary_mi_permutations = 30
 summary_mi_subsample = 5000
 summary_mi_quantile = 0.95

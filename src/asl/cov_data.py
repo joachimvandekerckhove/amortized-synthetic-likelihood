@@ -10,7 +10,7 @@ Usage:
 
 Configuration:
     [cov_data] parameter_draws, trials_per_replicate, replicates_per_parameter,
-               random_seed, parallel_workers  (in asl.toml)
+               random_seed, parallel_workers, parameter_mi_gate  (in asl.toml)
 """
 
 import json
@@ -24,6 +24,7 @@ from sklearn.feature_selection import mutual_info_regression
 
 from asl.config import load_config
 from asl.data import summary_column_masks
+from asl.mi_joint import joint_mi_ksg
 from asl.cholesky import pack_upper_tri, upper_tri_index_pairs
 from asl.spec import Model
 from models.catalog import get_model
@@ -95,6 +96,12 @@ def resolve_cov_qa_settings() -> tuple[float, int, int, float, int]:
     quantile = float(config.get("cov_data", "summary_mi_quantile", SUMMARY_MI_QUANTILE_DEFAULT))
     neighbors = int(config.get("cov_data", "summary_mi_neighbors", SUMMARY_MI_NEIGHBORS_DEFAULT))
     return min_var, n_perm, subsample, quantile, neighbors
+
+
+def parameter_mi_gate_enabled() -> bool:
+    """Return whether the joint parameter MI feasibility gate is active."""
+    config = load_config()
+    return bool(config.get("cov_data", "parameter_mi_gate", True))
 
 
 def check_summary_variance_gate(
@@ -174,40 +181,17 @@ def _summary_mi_threshold(
     return float(np.quantile(nulls, quantile))
 
 
-def _parameter_summary_mi_vector(
+def _parameter_joint_mi(
     param_col: np.ndarray,
     summary_cols: np.ndarray,
     *,
     neighbors: int,
-    random_state: int,
-) -> np.ndarray:
-    """MI between one parameter and each summary column."""
-    mi = np.empty(summary_cols.shape[1], dtype=np.float64)
-    for k in range(summary_cols.shape[1]):
-        mi[k] = mutual_info_regression(
-            param_col.reshape(-1, 1),
-            summary_cols[:, k],
-            random_state=random_state,
-            n_neighbors=neighbors,
-        )[0]
-    return mi
-
-
-def _max_parameter_summary_mi(
-    param_col: np.ndarray,
-    summary_cols: np.ndarray,
-    *,
-    neighbors: int,
-    random_state: int,
 ) -> float:
-    """Maximum MI between one parameter and any summary."""
-    mi = _parameter_summary_mi_vector(
-        param_col, summary_cols, neighbors=neighbors, random_state=random_state
-    )
-    return float(np.max(mi))
+    """MI between one parameter and the full summary vector."""
+    return joint_mi_ksg(param_col, summary_cols, k=neighbors)
 
 
-def _parameter_mi_threshold(
+def _parameter_joint_mi_threshold(
     param_col: np.ndarray,
     summary_cols: np.ndarray,
     *,
@@ -216,17 +200,13 @@ def _parameter_mi_threshold(
     quantile: float,
     random_state: int,
 ) -> float:
-    """Permutation null for parameter->summary MI (shuffle parameter labels)."""
+    """Permutation null for I(theta; S) (shuffle parameter labels)."""
     rng = np.random.default_rng(random_state)
     nulls = []
     for _ in range(n_perm):
         perm = param_col.copy()
         rng.shuffle(perm)
-        nulls.append(
-            _max_parameter_summary_mi(
-                perm, summary_cols, neighbors=neighbors, random_state=random_state
-            )
-        )
+        nulls.append(_parameter_joint_mi(perm, summary_cols, neighbors=neighbors))
     return float(np.quantile(nulls, quantile))
 
 
@@ -241,7 +221,7 @@ def report_parameter_mi_gate(
     neighbors: int = SUMMARY_MI_NEIGHBORS_DEFAULT,
     seed: int = SEED_DEFAULT,
 ) -> dict:
-    """Return per-parameter MI diagnostics for the hard gate."""
+    """Return per-parameter joint MI diagnostics for the hard gate."""
     n_rows = len(y_raw)
     if subsample is not None and n_rows > subsample:
         rng = np.random.default_rng(seed)
@@ -258,12 +238,8 @@ def report_parameter_mi_gate(
     failures: list[str] = []
     for j, name in enumerate(model.param_names):
         param_col = x_sub[:, j]
-        mi_by_summary = _parameter_summary_mi_vector(
-            param_col, y_sub, neighbors=neighbors, random_state=seed
-        )
-        mi_max = float(np.max(mi_by_summary))
-        best_idx = int(np.argmax(mi_by_summary))
-        threshold = _parameter_mi_threshold(
+        mi_joint = _parameter_joint_mi(param_col, y_sub, neighbors=neighbors)
+        threshold = _parameter_joint_mi_threshold(
             param_col,
             y_sub,
             n_perm=n_perm,
@@ -271,20 +247,15 @@ def report_parameter_mi_gate(
             quantile=quantile,
             random_state=seed + j + 1,
         )
-        passes = mi_max > threshold
+        passes = mi_joint > threshold
         if not passes:
-            failures.append(f"{name} (mi_max={mi_max:.4f}, thr={threshold:.4f})")
+            failures.append(f"{name} (mi_joint={mi_joint:.4f}, thr={threshold:.4f})")
         parameter_reports.append(
             {
                 "name": name,
-                "mi_max": mi_max,
-                "best_summary": model.summary_names[best_idx],
+                "mi_joint": mi_joint,
                 "threshold": threshold,
                 "passes": passes,
-                "mi_by_summary": {
-                    summary_name: float(mi_by_summary[k])
-                    for k, summary_name in enumerate(model.summary_names)
-                },
             }
         )
 
@@ -316,7 +287,7 @@ def check_parameter_mi_gate(
     neighbors: int = SUMMARY_MI_NEIGHBORS_DEFAULT,
     seed: int = SEED_DEFAULT,
 ) -> None:
-    """Require each parameter to carry detectable MI with at least one summary."""
+    """Require each parameter to carry detectable MI with the summary vector jointly."""
     report = report_parameter_mi_gate(
         y_raw,
         X,
@@ -447,16 +418,19 @@ def validate_cov_training_data(
     """Run post-generation QA gates on covariance training data."""
     min_var, n_perm, subsample, quantile, neighbors = resolve_cov_qa_settings()
     check_summary_variance_gate(y_raw, model, min_var=min_var)
-    check_parameter_mi_gate(
-        y_raw,
-        X,
-        model,
-        n_perm=n_perm,
-        subsample=subsample,
-        quantile=quantile,
-        neighbors=neighbors,
-        seed=seed,
-    )
+    if parameter_mi_gate_enabled():
+        check_parameter_mi_gate(
+            y_raw,
+            X,
+            model,
+            n_perm=n_perm,
+            subsample=subsample,
+            quantile=quantile,
+            neighbors=neighbors,
+            seed=seed,
+        )
+    else:
+        print("[cov_data] Parameter MI gate disabled.")
     return warn_summary_mi_diagnostic(
         y_raw,
         X,

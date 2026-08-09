@@ -22,6 +22,7 @@ from asl.cov_data import (
     expected_columns,
     load_cov_settings,
     logspace_to_raw,
+    parameter_mi_gate_enabled,
     report_parameter_mi_gate,
     report_summary_mi_diagnostic,
     resolve_cov_settings,
@@ -203,3 +204,55 @@ class TestCovTrainingQA:
         )
         assert not report["gate_passes"]
         assert any(item["name"] == "a" and not item["passes"] for item in report["parameters"])
+
+    def test_parameter_mi_gate_disabled(self, toy_model, config_file):
+        config_file(
+            "[cov_data]\n"
+            "parameter_mi_gate = false\n"
+            "summary_mi_permutations = 8\n"
+            "summary_mi_subsample = 200\n"
+        )
+        assert not parameter_mi_gate_enabled()
+        rng = np.random.default_rng(3)
+        n = 400
+        theta1 = rng.uniform(-1, 1, n)
+        theta2 = rng.uniform(0.5, 2.0, n)
+        X = np.column_stack([theta1, theta2])
+        y_raw = np.column_stack(
+            [
+                np.clip(0.5 + 0.1 * theta1, 0.01, 0.99),
+                0.3 + 0.05 * theta1 + 0.01 * rng.standard_normal(n),
+                0.01 + 0.001 * np.abs(theta1) + 0.001 * rng.standard_normal(n),
+            ]
+        )
+        validate_cov_training_data(X, y_raw, toy_model)
+
+    def test_joint_parameter_mi_gate_passes_synergistic_case(self, toy_model, config_file):
+        config_file(
+            "[cov_data]\n"
+            "summary_mi_permutations = 8\n"
+            "summary_mi_subsample = 400\n"
+        )
+        rng = np.random.default_rng(9)
+        n = 400
+        theta1 = rng.uniform(-1, 1, n)
+        theta2 = rng.uniform(0.5, 2.0, n)
+        carriers = rng.normal(size=n)
+        interaction = theta1 * carriers
+        X = np.column_stack([theta1, theta2])
+        y_raw = np.column_stack(
+            [
+                np.clip(0.5 + 0.03 * carriers + 0.001 * rng.standard_normal(n), 0.01, 0.99),
+                np.clip(0.3 + 0.03 * carriers + 0.001 * rng.standard_normal(n), 0.01, 0.99),
+                np.clip(0.01 + 0.2 * interaction + 0.001 * rng.standard_normal(n), 1e-4, 0.2),
+            ]
+        )
+        report = report_parameter_mi_gate(
+            y_raw=y_raw,
+            X=X,
+            model=toy_model,
+            n_perm=8,
+            subsample=400,
+        )
+        assert report["parameters"][0]["passes"]
+        assert report["parameters"][0]["mi_joint"] > report["parameters"][0]["threshold"]

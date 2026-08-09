@@ -176,8 +176,9 @@ def test_k_affects_summaries():
 
 If a parameter does not affect any summary, revise the model design. Do not
 proceed to emulator training until every parameter passes. The pipeline's
-`generate-data` step enforces this with a parameter-wise MI gate; summaries
-without an associated parameter produce a warning only.
+`generate-data` enforces a joint parameter MI gate (`I(theta_j; S)` via KSG);
+set `cov_data.parameter_mi_gate = false` to disable it. Summaries without an
+associated parameter produce a warning only.
 
 ## Phase 4 — Define the Model spec and register it
 
