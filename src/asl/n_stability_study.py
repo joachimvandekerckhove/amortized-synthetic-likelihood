@@ -1,10 +1,11 @@
 """
-Multi-N C1 stability evaluation for DDM emulators.
+Multi-N C1 stability evaluation for DDM and DW emulators.
 
 Draws fixed parameter vectors, simulates replicate datasets at several N,
 estimates C1(theta, N) = N * Cov(S_N | theta) in frozen target_transform
-space, and compares each N against an N=600 reference plus an independent
-N=600 null batch. Also reports frozen-emulator Mahalanobis calibration.
+space, and compares each N against a reference batch plus an independent
+null batch at the reference N. Also reports frozen-emulator Mahalanobis
+calibration.
 """
 
 from __future__ import annotations
@@ -38,10 +39,52 @@ from asl.ort_env import cpu_inference_session
 from asl.spec import Model
 from models.catalog import get_model
 
-SUPPORTED_SLUGS = ("ddm3", "ddm4", "ddmcollapsesig")
-DEFAULT_N_VALUES = (50, 100, 300, 600, 1000)
-REF_N = 600
-NULL_KEY = "600_null"
+SUPPORTED_SLUGS = ("ddm3", "ddm4", "ddmcollapsesig", "dw")
+
+
+@dataclass(frozen=True)
+class SlugProfile:
+    """Per-model N-stability settings."""
+
+    n_values: tuple[int, ...]
+    ref_n: int
+    null_key: str
+    table_order: tuple[str, ...]
+    n_size_label: str
+    default_n_theta: int
+    theta_mode: str  # "random" or "fixed_dw"
+
+
+DDM_PROFILE = SlugProfile(
+    n_values=(50, 100, 300, 600, 1000),
+    ref_n=600,
+    null_key="600_null",
+    table_order=("50", "100", "300", "600", "600_null", "1000"),
+    n_size_label="N",
+    default_n_theta=200,
+    theta_mode="random",
+)
+
+DW_PROFILE = SlugProfile(
+    n_values=(50, 100, 150, 300, 600),
+    ref_n=150,
+    null_key="150_null",
+    table_order=("50", "100", "150", "300", "600", "150_null"),
+    n_size_label=r"n_{\mathrm{agents}}",
+    default_n_theta=5,
+    theta_mode="fixed_dw",
+)
+
+SLUG_PROFILES: dict[str, SlugProfile] = {
+    "ddm3": DDM_PROFILE,
+    "ddm4": DDM_PROFILE,
+    "ddmcollapsesig": DDM_PROFILE,
+    "dw": DW_PROFILE,
+}
+
+
+def get_slug_profile(slug: str) -> SlugProfile:
+    return SLUG_PROFILES[slug]
 
 
 @dataclass(frozen=True)
@@ -51,7 +94,7 @@ class StudyConfig:
     slug: str
     n_theta: int
     n_replicates: int
-    n_values: tuple[int, ...]
+    profile: SlugProfile
     seed: int
     workers: int
     results_dir: Path
@@ -71,13 +114,13 @@ class StudyConfig:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate single-trial covariance stability across N."
+        description="Evaluate single-unit covariance stability across N."
     )
     parser.add_argument(
         "--slug",
         required=True,
         choices=SUPPORTED_SLUGS,
-        help="DDM emulator slug (ddm3, ddm4, or ddmcollapsesig).",
+        help="Model slug (DDM or dw).",
     )
     parser.add_argument(
         "--quick",
@@ -93,10 +136,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def build_config(args: argparse.Namespace) -> StudyConfig:
+    profile = get_slug_profile(args.slug)
     if args.quick:
         n_theta, n_replicates = 8, 40
     else:
-        n_theta, n_replicates = 200, 500
+        n_theta, n_replicates = profile.default_n_theta, 500
     if args.n_theta is not None:
         n_theta = args.n_theta
     if args.n_replicates is not None:
@@ -107,14 +151,19 @@ def build_config(args: argparse.Namespace) -> StudyConfig:
         slug=args.slug,
         n_theta=n_theta,
         n_replicates=n_replicates,
-        n_values=DEFAULT_N_VALUES,
+        profile=profile,
         seed=args.seed,
         workers=workers,
         results_dir=results_dir,
     )
 
 
-def draw_fixed_thetas(model: Model, n_theta: int, seed: int) -> np.ndarray:
+def draw_fixed_thetas(model: Model, n_theta: int, seed: int, profile: SlugProfile) -> np.ndarray:
+    if profile.theta_mode == "fixed_dw":
+        from models.social.dw import study_logit_thetas
+
+        return study_logit_thetas(n_theta)
+
     rng = np.random.default_rng(seed)
     params = np.empty((n_theta, model.n_params), dtype=np.float64)
     for i, (lo, hi) in enumerate(model.param_bounds):
@@ -138,7 +187,7 @@ def raw_checkpoint_path(results_dir: Path, batch_key: str) -> Path:
 
 
 def _simulate_theta_batch(args: tuple) -> dict:
-    slug, theta_index, params, n_trials, n_replicates, base_seed, transform_path = args
+    slug, theta_index, params, n_size, n_replicates, base_seed, transform_path = args
     model = get_model(slug)
     with open(transform_path, "rb") as handle:
         target_transform = pickle.load(handle)
@@ -147,7 +196,7 @@ def _simulate_theta_batch(args: tuple) -> dict:
     n_failed = 0
     for replicate_index in range(n_replicates):
         summaries = model.simulate_summaries(
-            params, n_trials, base_seed + replicate_index
+            params, n_size, base_seed + replicate_index
         )
         if not np.all(np.isfinite(summaries)):
             n_failed += 1
@@ -171,7 +220,7 @@ def _simulate_theta_batch(args: tuple) -> dict:
         }
 
     valid_rows = summaries_std[valid]
-    c1 = estimate_c1(valid_rows, n_trials)
+    c1 = estimate_c1(valid_rows, n_size)
     return {
         "theta_index": theta_index,
         "params": params.astype(np.float64),
@@ -188,7 +237,7 @@ def run_batch(
     config: StudyConfig,
     params: np.ndarray,
     batch_key: str,
-    n_trials: int,
+    n_size: int,
 ) -> dict:
     path = raw_checkpoint_path(config.results_dir, batch_key)
     if path.exists():
@@ -196,7 +245,7 @@ def run_batch(
         loaded = np.load(path, allow_pickle=False)
         payload = {key: loaded[key] for key in loaded.files}
         payload["batch_key"] = batch_key
-        payload["n_trials"] = n_trials
+        payload["n_size"] = n_size
         return payload
 
     n_summaries = config.n_summaries
@@ -206,7 +255,7 @@ def run_batch(
             config.slug,
             theta_index,
             params[theta_index],
-            n_trials,
+            n_size,
             config.n_replicates,
             batch_seed(config.seed, batch_key, theta_index),
             transform_path,
@@ -216,7 +265,7 @@ def run_batch(
 
     print(
         f"[n_stability] {config.slug} batch {batch_key} "
-        f"(N={n_trials}, thetas={config.n_theta}, R={config.n_replicates}, "
+        f"(N={n_size}, thetas={config.n_theta}, R={config.n_replicates}, "
         f"workers={config.workers})"
     )
 
@@ -257,7 +306,7 @@ def run_batch(
         "n_valid": n_valid,
         "n_failed": n_failed,
         "ok": ok,
-        "n_trials": np.array(n_trials),
+        "n_size": np.array(n_size),
         "batch_key": np.array(batch_key),
         "seed": np.array(config.seed),
         "n_replicates": np.array(config.n_replicates),
@@ -266,7 +315,7 @@ def run_batch(
     np.savez_compressed(path, **payload)
     print(f"[n_stability] Wrote {path}")
     payload["batch_key"] = batch_key
-    payload["n_trials"] = n_trials
+    payload["n_size"] = n_size
     return payload
 
 
@@ -307,7 +356,7 @@ def mahalanobis_for_batch(
 ) -> dict[str, np.ndarray]:
     params = batch["params"]
     summaries_std = np.asarray(batch["summaries_std"], dtype=np.float64)
-    n_trials = int(batch["n_trials"])
+    n_size = int(batch["n_size"])
     n_theta, n_replicates, _ = summaries_std.shape
 
     d2 = np.full((n_theta, n_replicates), np.nan, dtype=np.float64)
@@ -319,7 +368,7 @@ def mahalanobis_for_batch(
         mu_std = pred[:n_summaries]
         chol_upper = pred[n_summaries:]
         try:
-            sigma_total = sigma_total_from_emulator(chol_upper, sigma_emu, n_trials)
+            sigma_total = sigma_total_from_emulator(chol_upper, sigma_emu, n_size)
             precision = np.linalg.inv(sigma_total)
         except np.linalg.LinAlgError:
             continue
@@ -418,23 +467,26 @@ def format_interval(summary: dict) -> str:
     return f"{rounded[0]} [{rounded[1]}, {rounded[2]}]"
 
 
-def write_table_tex(summary: dict, path: Path) -> None:
+def write_table_tex(summary: dict, path: Path, profile: SlugProfile) -> None:
     n_summaries = len(summary["summary_names"])
-    ordered_keys = ["50", "100", "300", "600", NULL_KEY, "1000"]
     lines = [
         r"\begin{tabular}{lcccc}",
         r"\toprule",
         (
-            rf"$N$ & diag.\ ratio & rel.\ Frob. "
+            rf"${profile.n_size_label}$ & diag.\ ratio & rel.\ Frob. "
             rf"& Stein & $E[D^2]/{n_summaries}$/cov$_{{95}}$ \\"
         ),
         r"\midrule",
     ]
-    for batch_key in ordered_keys:
+    for batch_key in profile.table_order:
         if batch_key not in summary["batches"]:
             continue
         block = summary["batches"][batch_key]
-        label = "600$^{\\mathrm{null}}$" if batch_key == NULL_KEY else batch_key
+        ref_n = summary["reference_n"]
+        if batch_key == profile.null_key:
+            label = f"{ref_n}$^{{\\mathrm{{null}}}}$"
+        else:
+            label = batch_key
         cov = block["covariance_vs_ref"]
         maha = block["mahalanobis"]
         diag_medians = [item["median"] for item in cov["diag_ratios"]]
@@ -454,6 +506,7 @@ def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
     sigma_emu = load_emulator_error_cov(config.slug)
     n_summaries = config.n_summaries
     chi2_p95 = config.chi2_p95
+    profile = config.profile
 
     maha_by_key = {
         key: mahalanobis_for_batch(batch, session, sigma_emu, n_summaries)
@@ -462,7 +515,7 @@ def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
 
     plot_payload: dict[str, np.ndarray] = {}
     summary_batches: dict[str, dict] = {}
-    ref = batches[str(REF_N)]
+    ref = batches[str(profile.ref_n)]
 
     for batch_key, batch in batches.items():
         rows = []
@@ -485,7 +538,7 @@ def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
 
         ok_both = batch["ok"] & ref["ok"]
         summary_batches[batch_key] = {
-            "n_trials": int(batch["n_trials"]),
+            "n_size": int(batch["n_size"]),
             "n_ok": int(batch["ok"].sum()),
             "n_failed_replicates": int(batch["n_failed"].sum()),
             "covariance_vs_ref": summarize_comparisons(rows, n_summaries),
@@ -506,8 +559,9 @@ def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
         "seed": config.seed,
         "n_theta": config.n_theta,
         "n_replicates": config.n_replicates,
-        "reference_n": REF_N,
-        "null_key": NULL_KEY,
+        "reference_n": profile.ref_n,
+        "null_key": profile.null_key,
+        "sample_size_label": profile.n_size_label,
         "summary_names": list(config.model.summary_names),
         "chi2_p95": chi2_p95,
         "batches": summary_batches,
@@ -518,7 +572,7 @@ def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
     print(f"[n_stability] Wrote {summary_path}")
 
     table_path = config.results_dir / "n_stability_table.tex"
-    write_table_tex(summary, table_path)
+    write_table_tex(summary, table_path, profile)
     print(f"[n_stability] Wrote {table_path}")
 
     plot_path = config.results_dir / "n_stability_plot_data.npz"
@@ -543,19 +597,26 @@ def run_study(argv: list[str] | None = None) -> dict:
 
     load_target_transform(config.slug)
 
-    params = draw_fixed_thetas(config.model, config.n_theta, config.seed)
+    params = draw_fixed_thetas(
+        config.model, config.n_theta, config.seed, config.profile
+    )
     batches: dict[str, dict] = {}
-    for n_trials in config.n_values:
-        batches[str(n_trials)] = run_batch(config, params, str(n_trials), n_trials)
-    batches[NULL_KEY] = run_batch(config, params, NULL_KEY, REF_N)
+    profile = config.profile
+    for n_size in profile.n_values:
+        batches[str(n_size)] = run_batch(config, params, str(n_size), n_size)
+    batches[profile.null_key] = run_batch(
+        config, params, profile.null_key, profile.ref_n
+    )
 
     summary = aggregate_all(config, batches)
     print(f"[n_stability] Done ({config.slug}).")
     for key, block in summary["batches"].items():
         cov = block["covariance_vs_ref"]
         maha = block["mahalanobis"]
+        mean_shift = block["mean_shift_vs_ref"]
         print(
-            f"  N={key}: stein med={cov['stein']['median']:.4f}, "
+            f"  N={key}: mean_l2 med={mean_shift['l2']['median']:.4f}, "
+            f"stein med={cov['stein']['median']:.4f}, "
             f"fro med={cov['rel_frobenius']['median']:.4f}, "
             f"E[D2]/p={maha['mean_d2_over_p']:.3f}, "
             f"cov95={maha['coverage_95']:.3f}"
