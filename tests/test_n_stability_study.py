@@ -85,15 +85,17 @@ class TestCheckpointValidation:
             "n_replicates": np.array(10),
             "n_size": np.array(50),
             "batch_key": np.array("50"),
-            "target_transform_sha256": np.array("source-transform"),
+            "target_transform_sha256": np.array("target-transform"),
+            "simulation_context_sha256": np.array("source-simulation"),
             "params": np.array([[0.1, 0.2], [0.3, 0.4]]),
         }
 
         assert not n_stability_study.checkpoint_matches_study(
             payload,
             Config(),
-            np.array([[0.1, 0.2], [0.5, 0.6]]),
+            np.array([[0.1, 0.2], [0.3, 0.4]]),
             "50",
             50,
-            "other-transform",
+            "target-transform",
+            "other-simulation",
         )

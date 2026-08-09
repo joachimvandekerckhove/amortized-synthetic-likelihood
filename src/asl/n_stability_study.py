@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import pickle
 import sys
 from dataclasses import dataclass
@@ -204,6 +205,29 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def simulation_context_sha256() -> str:
+    """Fingerprint simulator source and configuration inputs for raw batches."""
+    repo_root = Path(__file__).resolve().parents[2]
+    paths = sorted((repo_root / "models").rglob("*.py"))
+    paths.extend(
+        [
+            repo_root / "src" / "asl" / "config.py",
+            repo_root / "src" / "asl" / "n_stability_study.py",
+            repo_root / "src" / "asl" / "presets" / "full.toml",
+            repo_root / "asl.toml",
+        ]
+    )
+    config_override = os.environ.get("ASL_CONFIG")
+    if config_override:
+        paths.append(Path(config_override))
+
+    digest = hashlib.sha256()
+    for path in sorted({path.resolve() for path in paths if path.is_file()}):
+        digest.update(str(path).encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def checkpoint_matches_study(
     payload: dict,
     config: StudyConfig,
@@ -211,6 +235,7 @@ def checkpoint_matches_study(
     batch_key: str,
     n_size: int,
     target_transform_sha256: str,
+    simulation_context_sha256: str,
 ) -> bool:
     """Return whether a cached batch belongs to this exact study request."""
     required = {
@@ -220,6 +245,7 @@ def checkpoint_matches_study(
         "n_size",
         "batch_key",
         "target_transform_sha256",
+        "simulation_context_sha256",
         "params",
     }
     if not required.issubset(payload):
@@ -231,6 +257,8 @@ def checkpoint_matches_study(
         and int(payload["n_size"].item()) == n_size
         and str(payload["batch_key"].item()) == batch_key
         and str(payload["target_transform_sha256"].item()) == target_transform_sha256
+        and str(payload["simulation_context_sha256"].item())
+        == simulation_context_sha256
         and payload["params"].shape == params.shape
         and np.array_equal(payload["params"], params)
     )
@@ -292,11 +320,18 @@ def run_batch(
     path = raw_checkpoint_path(config.results_dir, batch_key)
     transform_path = config.results_dir / "target_transform.pkl"
     transform_sha256 = file_sha256(transform_path)
+    simulation_sha256 = simulation_context_sha256()
     if path.exists():
         loaded = np.load(path, allow_pickle=False)
         payload = {key: loaded[key] for key in loaded.files}
         if checkpoint_matches_study(
-            payload, config, params, batch_key, n_size, transform_sha256
+            payload,
+            config,
+            params,
+            batch_key,
+            n_size,
+            transform_sha256,
+            simulation_sha256,
         ):
             print(f"[n_stability] Loading checkpoint {path.name}")
             payload["batch_key"] = batch_key
@@ -365,6 +400,7 @@ def run_batch(
         "n_size": np.array(n_size),
         "batch_key": np.array(batch_key),
         "target_transform_sha256": np.array(transform_sha256),
+        "simulation_context_sha256": np.array(simulation_sha256),
         "seed": np.array(config.seed),
         "n_replicates": np.array(config.n_replicates),
     }
@@ -417,6 +453,7 @@ def rerun_batch_points(
 
     batch["slug"] = np.array(config.slug)
     batch["target_transform_sha256"] = np.array(file_sha256(transform_path))
+    batch["simulation_context_sha256"] = np.array(simulation_context_sha256())
     np.savez_compressed(raw_checkpoint_path(config.results_dir, batch_key), **batch)
 
 
