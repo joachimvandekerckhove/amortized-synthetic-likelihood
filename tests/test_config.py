@@ -8,6 +8,7 @@ from asl.config import load_config, reset_config
 class TestConfig:
     def test_defaults_without_file(self, repo_root, monkeypatch):
         monkeypatch.chdir(repo_root)
+        monkeypatch.delenv("ASL_CONFIG", raising=False)
         reset_config()
         config = load_config()
         assert config.get("training", "training_epochs") == 25000
