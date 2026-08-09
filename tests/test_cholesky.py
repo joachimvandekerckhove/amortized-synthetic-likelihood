@@ -104,6 +104,14 @@ class TestJagsHelpers:
         lines = build_sl_likelihood_line("ddm3", ("v", "a", "t0"), 3)
         assert lines == ["obs[1:3] ~ ddm3_sl(v, a, t0, n_trials)"]
 
+    def test_build_sl_likelihood_line_n_agents(self):
+        lines = build_sl_likelihood_line(
+            "dw", ("logit_epsilon", "logit_mu"), 6, n_trials_name="n_agents"
+        )
+        assert lines == [
+            "obs[1:6] ~ dw_sl(logit_epsilon, logit_mu, n_agents)"
+        ]
+
     def test_emulator_output_names(self):
         names = emulator_output_names_for(2, ("acc", "rt"))
         assert names[0] == "mu_acc"
