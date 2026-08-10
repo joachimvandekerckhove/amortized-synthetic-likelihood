@@ -51,7 +51,7 @@ def test_install_jags_module_uses_sudo_make_install(tmp_path, monkeypatch):
 
     _install_jags_module(tmp_path, {"ONNXRUNTIME_DIR": "/sdk"})
 
-    assert calls == [(["sudo", "make", "install"], tmp_path)]
+    assert calls == [(["sudo", "make", "install", "ONNXRUNTIME_DIR=/sdk"], tmp_path)]
 
 
 def test_active_jags_mean_parity_rejects_a_stale_module():

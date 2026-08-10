@@ -3,6 +3,7 @@ asl.wire -- Wire a trained ONNX emulator into JAGS via JNNX.
 """
 
 import json
+import os
 import pickle
 import shutil
 import subprocess
@@ -191,8 +192,12 @@ def _compile_jags_module(module_dir: Path, env: dict) -> None:
 
 def _install_jags_module(module_dir: Path, env: dict) -> None:
     """Install the module in JAGS's system module directory."""
+    ort_dir = env.get("ONNXRUNTIME_DIR", "")
+    install_cmd = ["sudo", "make", "install"]
+    if ort_dir:
+        install_cmd.append(f"ONNXRUNTIME_DIR={ort_dir}")
     result = subprocess.run(
-        ["sudo", "make", "install"],
+        install_cmd,
         cwd=str(module_dir),
         env=env,
         capture_output=True,
