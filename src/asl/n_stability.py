@@ -80,23 +80,6 @@ def omega_from_chol_upper(chol_upper: np.ndarray, n_summaries: int) -> np.ndarra
     return L.T @ L
 
 
-def sigma_total_from_emulator(
-    chol_upper: np.ndarray,
-    sigma_emu: np.ndarray,
-    n_trials: int,
-) -> np.ndarray:
-    """Assemble Sigma_total = inv(N * Omega1) + Sigma_emu."""
-    n_summaries = int(np.asarray(sigma_emu).shape[0])
-    omega1 = omega_from_chol_upper(chol_upper, n_summaries)
-    sigma_samp = np.linalg.inv(n_trials * omega1)
-    return sigma_samp + np.asarray(sigma_emu, dtype=np.float64)
-
-
-def mahalanobis_d2(residual: np.ndarray, sigma_total: np.ndarray) -> float:
-    """Squared Mahalanobis distance residual^T Sigma^{-1} residual."""
-    return float(residual @ np.linalg.solve(sigma_total, residual))
-
-
 def percentile_summary(values: np.ndarray) -> dict[str, float]:
     """Median and central 90% interval for a 1-d array."""
     values = np.asarray(values, dtype=np.float64)

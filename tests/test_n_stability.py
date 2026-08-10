@@ -11,10 +11,8 @@ from asl.n_stability import (
     estimate_c1,
     generalized_eigenvalues,
     is_positive_definite,
-    mahalanobis_d2,
     omega_from_chol_upper,
     relative_frobenius_error,
-    sigma_total_from_emulator,
     stein_discrepancy,
 )
 
@@ -67,19 +65,9 @@ class TestPositiveDefinite:
         assert not is_positive_definite(matrix)
 
 
-class TestMahalanobis:
+class TestOmegaFromChol:
     def test_uses_exported_chol_layout(self):
         chol_upper = np.array([2.0, 1.0, 3.0])
         omega = omega_from_chol_upper(chol_upper, 2)
         expected_omega = np.array([[4.0, 2.0], [2.0, 10.0]])
         np.testing.assert_allclose(omega, expected_omega)
-
-        sigma_emu = np.zeros((2, 2))
-        n_trials = 4
-        sigma_total = sigma_total_from_emulator(chol_upper, sigma_emu, n_trials)
-        np.testing.assert_allclose(sigma_total, np.linalg.inv(n_trials * omega))
-
-        residual = np.array([1.0, -0.5])
-        d2 = mahalanobis_d2(residual, sigma_total)
-        expected = float(residual @ np.linalg.solve(sigma_total, residual))
-        assert d2 == pytest.approx(expected)

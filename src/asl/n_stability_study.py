@@ -4,8 +4,7 @@ Multi-N C1 stability evaluation for DDM and DW emulators.
 Draws fixed parameter vectors, simulates replicate datasets at several N,
 estimates C1(theta, N) = N * Cov(S_N | theta) in frozen target_transform
 space, and compares each N against a reference batch plus an independent
-null batch at the reference N. Also reports frozen-emulator Mahalanobis
-calibration.
+null batch at the reference N.
 """
 
 from __future__ import annotations
@@ -21,9 +20,7 @@ from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
 import numpy as np
-from scipy import stats
 
-from asl.cholesky import load_emulator_error_cov
 from asl.cov_data import SEED_DEFAULT
 from asl.data import load_target_transform
 from asl.n_stability import (
@@ -34,10 +31,8 @@ from asl.n_stability import (
     is_positive_definite,
     percentile_summary,
     relative_frobenius_error,
-    sigma_total_from_emulator,
     stein_discrepancy,
 )
-from asl.ort_env import cpu_inference_session
 from asl.spec import Model
 from models.catalog import get_model
 
@@ -109,10 +104,6 @@ class StudyConfig:
     @property
     def n_summaries(self) -> int:
         return self.model.n_summaries
-
-    @property
-    def chi2_p95(self) -> float:
-        return float(stats.chi2.ppf(0.95, df=self.n_summaries))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -544,41 +535,6 @@ def compare_to_reference(
     }
 
 
-def mahalanobis_for_batch(
-    batch: dict,
-    session,
-    sigma_emu: np.ndarray,
-    n_summaries: int,
-) -> dict[str, np.ndarray]:
-    params = batch["params"]
-    summaries_std = np.asarray(batch["summaries_std"], dtype=np.float64)
-    n_size = int(batch["n_size"])
-    n_theta, n_replicates, _ = summaries_std.shape
-
-    d2 = np.full((n_theta, n_replicates), np.nan, dtype=np.float64)
-    for theta_index in range(n_theta):
-        pred = session.run(
-            None,
-            {"input": params[theta_index].astype(np.float32).reshape(1, -1)},
-        )[0][0]
-        mu_std = pred[:n_summaries]
-        chol_upper = pred[n_summaries:]
-        try:
-            sigma_total = sigma_total_from_emulator(chol_upper, sigma_emu, n_size)
-            precision = np.linalg.inv(sigma_total)
-        except np.linalg.LinAlgError:
-            continue
-        rows = summaries_std[theta_index]
-        valid = np.all(np.isfinite(rows), axis=1)
-        if not np.any(valid):
-            continue
-        residuals = rows[valid] - mu_std
-        d2[theta_index, valid] = np.einsum(
-            "ij,jk,ik->i", residuals, precision, residuals
-        )
-    return {"d2": d2}
-
-
 def summarize_comparisons(rows: list[dict], n_summaries: int) -> dict:
     valid_rows = [row for row in rows if row["valid"]]
     if not valid_rows:
@@ -616,23 +572,6 @@ def summarize_comparisons(rows: list[dict], n_summaries: int) -> dict:
     }
 
 
-def summarize_mahalanobis(d2: np.ndarray, n_summaries: int, chi2_p95: float) -> dict:
-    flat = d2[np.isfinite(d2)]
-    if flat.size == 0:
-        return {
-            "n_obs": 0,
-            "mean_d2_over_p": float("nan"),
-            "median_d2_over_p": float("nan"),
-            "coverage_95": float("nan"),
-        }
-    return {
-        "n_obs": int(flat.size),
-        "mean_d2_over_p": float(flat.mean() / n_summaries),
-        "median_d2_over_p": float(np.median(flat) / n_summaries),
-        "coverage_95": float(np.mean(flat <= chi2_p95)),
-    }
-
-
 def mean_shift_summary(
     mean_n: np.ndarray,
     mean_ref: np.ndarray,
@@ -666,11 +605,11 @@ def format_interval(summary: dict) -> str:
 def write_table_tex(summary: dict, path: Path, profile: SlugProfile) -> None:
     n_summaries = len(summary["summary_names"])
     lines = [
-        r"\begin{tabular}{lcccc}",
+        r"\begin{tabular}{lccc}",
         r"\toprule",
         (
             rf"${profile.n_size_label}$ & diag.\ ratio & rel.\ Frob. "
-            rf"& Stein & $E[D^2]/{n_summaries}$/cov$_{{95}}$ \\"
+            r"& Stein \\"
         ),
         r"\midrule",
     ]
@@ -684,14 +623,12 @@ def write_table_tex(summary: dict, path: Path, profile: SlugProfile) -> None:
         else:
             label = batch_key
         cov = block["covariance_vs_ref"]
-        maha = block["mahalanobis"]
         diag_medians = [item["median"] for item in cov["diag_ratios"]]
         diag_cell = float(np.mean(diag_medians))
         lines.append(
             f"{label} & {diag_cell:.3f} & "
             f"{format_interval(cov['rel_frobenius'])} & "
-            f"{format_interval(cov['stein'])} & "
-            f"{maha['mean_d2_over_p']:.3f} / {maha['coverage_95']:.3f} \\\\"
+            f"{format_interval(cov['stein'])} \\\\"
         )
     lines.extend([r"\bottomrule", r"\end{tabular}", ""])
     path.write_text("\n".join(lines), encoding="ascii")
@@ -713,16 +650,8 @@ def check_complete_covariance_profile(batches: dict[str, dict]) -> None:
 
 
 def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
-    session = cpu_inference_session(config.results_dir / "model.onnx")
-    sigma_emu = load_emulator_error_cov(config.slug)
     n_summaries = config.n_summaries
-    chi2_p95 = config.chi2_p95
     profile = config.profile
-
-    maha_by_key = {
-        key: mahalanobis_for_batch(batch, session, sigma_emu, n_summaries)
-        for key, batch in batches.items()
-    }
 
     plot_payload: dict[str, np.ndarray] = {}
     summary_batches: dict[str, dict] = {}
@@ -753,9 +682,6 @@ def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
             "n_ok": int(batch["ok"].sum()),
             "n_failed_replicates": int(batch["n_failed"].sum()),
             "covariance_vs_ref": summarize_comparisons(rows, n_summaries),
-            "mahalanobis": summarize_mahalanobis(
-                maha_by_key[batch_key]["d2"], n_summaries, chi2_p95
-            ),
             "mean_shift_vs_ref": mean_shift_summary(
                 batch["mean_std"], ref["mean_std"], ok_both, n_summaries
             ),
@@ -763,7 +689,6 @@ def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
         plot_payload[f"stein_{batch_key}"] = stein_vals
         plot_payload[f"frobenius_{batch_key}"] = fro_vals
         plot_payload[f"diag_ratios_{batch_key}"] = diag_vals
-        plot_payload[f"d2_{batch_key}"] = maha_by_key[batch_key]["d2"]
 
     summary = {
         "slug": config.slug,
@@ -774,7 +699,6 @@ def aggregate_all(config: StudyConfig, batches: dict[str, dict]) -> dict:
         "null_key": profile.null_key,
         "sample_size_label": profile.n_size_label,
         "summary_names": list(config.model.summary_names),
-        "chi2_p95": chi2_p95,
         "batches": summary_batches,
     }
 
@@ -825,14 +749,11 @@ def run_study(argv: list[str] | None = None) -> dict:
     print(f"[n_stability] Done ({config.slug}).")
     for key, block in summary["batches"].items():
         cov = block["covariance_vs_ref"]
-        maha = block["mahalanobis"]
         mean_shift = block["mean_shift_vs_ref"]
         print(
             f"  N={key}: mean_l2 med={mean_shift['l2']['median']:.4f}, "
             f"stein med={cov['stein']['median']:.4f}, "
-            f"fro med={cov['rel_frobenius']['median']:.4f}, "
-            f"E[D2]/p={maha['mean_d2_over_p']:.3f}, "
-            f"cov95={maha['coverage_95']:.3f}"
+            f"fro med={cov['rel_frobenius']['median']:.4f}"
         )
     return summary
 
