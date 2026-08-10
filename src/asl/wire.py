@@ -3,12 +3,13 @@ asl.wire -- Wire a trained ONNX emulator into JAGS via JNNX.
 """
 
 import json
-import os
 import pickle
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import numpy as np
 
 from asl.data import write_obs_transform_json
 from asl.cholesky import emulator_error_cov_path, load_emulator_error_cov, n_chol
@@ -189,20 +190,7 @@ def _compile_jags_module(module_dir: Path, env: dict) -> None:
 
 
 def _install_jags_module(module_dir: Path, env: dict) -> None:
-    """Install JAGS module to user-local path, then sudo, then LTDL fallback."""
-    user_prefix = Path.home() / ".local"
-    env_with_prefix = {**env, "PREFIX": str(user_prefix)}
-
-    result = subprocess.run(
-        ["make", "install", f"prefix={user_prefix}"],
-        cwd=str(module_dir),
-        env=env_with_prefix,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        return
-
+    """Install the module in JAGS's system module directory."""
     result = subprocess.run(
         ["sudo", "make", "install"],
         cwd=str(module_dir),
@@ -213,14 +201,115 @@ def _install_jags_module(module_dir: Path, env: dict) -> None:
     if result.returncode == 0:
         return
 
-    so_files = list(module_dir.glob("*.so")) + list(module_dir.glob(".libs/*.so"))
-    if so_files:
-        os.environ["LTDL_LIBRARY_PATH"] = str(so_files[0].parent)
-        return
-
     print(result.stdout, file=sys.stderr)
     print(result.stderr, file=sys.stderr)
-    raise RuntimeError("Module install failed")
+    raise RuntimeError(
+        "System-wide JAGS module installation failed. "
+        "Recovery would otherwise load a stale module."
+    )
+
+
+def assert_active_jags_mean_parity(
+    expected: list[float] | np.ndarray,
+    observed: list[float] | np.ndarray,
+    *,
+    atol: float = 1.0e-4,
+) -> None:
+    """Require JAGS's active module mean to match the packaged ONNX output."""
+    expected_arr = np.asarray(expected, dtype=np.float64)
+    observed_arr = np.asarray(observed, dtype=np.float64)
+    if expected_arr.shape != observed_arr.shape:
+        raise RuntimeError(
+            "Active JAGS module mean has shape "
+            f"{observed_arr.shape}; expected {expected_arr.shape}."
+        )
+    max_diff = float(np.max(np.abs(expected_arr - observed_arr)))
+    if not np.isfinite(max_diff) or max_diff > atol:
+        raise RuntimeError(
+            "Active JAGS module does not match the packaged ONNX mean "
+            f"(max abs diff={max_diff:.3e}, tolerance={atol:.1e})."
+        )
+
+
+def _run_active_jags_parity_check(model: Model, package_dir: Path) -> None:
+    """Compare the installed JAGS module with the package's ONNX and SL math."""
+    from py2jags import run_jags
+
+    from asl.config import load_config
+    from asl.ort_env import cpu_inference_session
+    from jnnx.sl_reference import (
+        mvn_logdens_precision,
+        obs_raw_to_std,
+        omega_total_from_chol,
+    )
+
+    n_trials = int(load_config().get("recovery", "trials_per_subject", 500))
+    theta = np.array(
+        [(lo + hi) / 2.0 for lo, hi in model.param_bounds], dtype=np.float64
+    )
+    obs = model.simulate_summaries(theta, n_trials, seed=91_027)
+    if not np.all(np.isfinite(obs)):
+        raise RuntimeError("Cannot verify active JAGS module: invalid test observation.")
+
+    session = cpu_inference_session(package_dir / "model.onnx")
+    onnx_output = session.run(
+        None, {"input": theta.reshape(1, -1).astype(np.float32)}
+    )[0][0]
+    expected_mean = onnx_output[: model.n_summaries]
+
+    with open(package_dir / "obs_transform.json") as f:
+        obs_transform = json.load(f)
+    with open(package_dir / "likelihood.json") as f:
+        sigma_emu = np.asarray(json.load(f)["sigma_emu"], dtype=np.float64)
+    obs_std, valid = obs_raw_to_std(
+        obs,
+        obs_transform["column_transforms"],
+        obs_transform["scaler_mean"],
+        obs_transform["scaler_scale"],
+    )
+    if not valid:
+        raise RuntimeError("Cannot verify active JAGS module: invalid transformed observation.")
+    omega_total = omega_total_from_chol(
+        onnx_output[model.n_summaries :],
+        n_trials,
+        sigma_emu,
+        model.n_summaries,
+    )
+    expected_logdens = mvn_logdens_precision(
+        obs_std, expected_mean, omega_total, model.n_summaries
+    )
+
+    theta_args = ", ".join(f"{value:.17g}" for value in theta)
+    obs_args = ", ".join(f"obs[{i + 1}]" for i in range(model.n_summaries))
+    model_string = f"""
+    model {{
+        mu[1:{model.n_summaries}] <- {model.slug}_mean({theta_args})
+        logdens <- {model.slug}_logdens({obs_args}, {theta_args}, {n_trials})
+        dummy ~ dnorm(0, 1) T(0, 0)
+    }}
+    """
+    result = run_jags(
+        model_string=model_string,
+        data_dict={"obs": obs.tolist(), "n": 1},
+        monitorparams=["mu", "logdens"],
+        nchains=1,
+        nsamples=2,
+        nburnin=0,
+        nadapt=0,
+        modules=[f"{model.slug}_emulator"],
+    )
+    observed_mean = np.array(
+        [result.get_samples(f"mu_{i + 1}")[0] for i in range(model.n_summaries)]
+    )
+    assert_active_jags_mean_parity(expected_mean, observed_mean)
+
+    observed_logdens = float(result.get_samples("logdens")[0])
+    logdens_diff = abs(expected_logdens - observed_logdens)
+    if not np.isfinite(logdens_diff) or logdens_diff > 1.0e-4:
+        raise RuntimeError(
+            "Active JAGS synthetic likelihood does not match the packaged ONNX "
+            f"and likelihood sidecars (abs log-density diff={logdens_diff:.3e})."
+        )
 
 
 def compile_and_install_module(package_dir: Path) -> Path:
@@ -252,6 +341,8 @@ def wire_to_jags(model: Model) -> None:
     build_jnnx_package(model, onnx_path, package_dir)
     validate_package(package_dir)
     compile_and_install_module(package_dir)
+    if _supports_sl_package(model):
+        _run_active_jags_parity_check(model, package_dir)
     dist = f"{slug}_sl" if _supports_sl_package(model) else f"{slug}_emulator"
     print(f"[wire] Installed JAGS module: {dist}")
     print("[wire] ONNX Runtime lib on LD_LIBRARY_PATH for JAGS recovery")
