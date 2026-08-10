@@ -17,6 +17,8 @@ from models.social.dw import (
     TRAINING_EPSILON_BOUNDS,
     TRAINING_MU_BOUNDS,
     DW_STUDY_CANONICAL_THETAS,
+    _mean_pairwise_distance,
+    _mean_pairwise_sq_distance,
     _run_interactions,
     _simulate_opinion_waves,
     _summaries_from_waves,
@@ -70,6 +72,22 @@ class TestInteractionExposure:
         assert all(wave.shape[0] == 80 for wave in waves)
 
 
+class TestPairwiseSummaries:
+    def test_pairwise_distance_bounds(self):
+        opinions = np.array([0.0, 0.5, 1.0])
+        distance = _mean_pairwise_distance(opinions)
+        sq_distance = _mean_pairwise_sq_distance(opinions)
+        assert 0.0 < distance < 1.0
+        assert 0.0 < sq_distance < 1.0
+        assert sq_distance >= distance**2
+
+    def test_pairwise_summaries_are_deterministic(self):
+        opinions = np.linspace(0.1, 0.9, 12)
+        a = _mean_pairwise_distance(opinions)
+        b = _mean_pairwise_distance(opinions)
+        assert a == pytest.approx(b)
+
+
 class TestSimulator:
     def test_output_shape_and_finiteness(self):
         result = simulate_summaries(INTERIOR_LOGIT, n_agents=150, seed=11)
@@ -85,7 +103,7 @@ class TestSimulator:
         result = simulate_summaries(INTERIOR_LOGIT, n_agents=1, seed=1)
         assert np.all(np.isnan(result))
 
-    def test_epsilon_decreases_effective_clusters(self):
+    def test_low_epsilon_increases_pairwise_distance(self):
         low_eps = simulate_summaries(
             np.array([logit(TRAINING_EPSILON_BOUNDS[0] + 0.02), INTERIOR_LOGIT[1]]),
             n_agents=150,
@@ -120,7 +138,7 @@ class TestSimulator:
         assert np.all(np.isfinite(high_eps))
         assert np.all(np.isfinite(low_eps_heavy))
         assert np.all(np.isfinite(high_eps_heavy))
-        assert low_eps_heavy[0] > high_eps_heavy[0] + 0.15
+        assert low_eps_heavy[0] > high_eps_heavy[0] + 0.01
 
     def test_mu_increases_large_move_fraction(self):
         low_mu = _summaries_from_waves(

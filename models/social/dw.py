@@ -38,8 +38,8 @@ PARAM_BOUNDS = DW_LOGIT_TRAINING_BOUNDS
 PRIOR_PARAM_BOUNDS = DW_LOGIT_PRIOR_BOUNDS
 
 SUMMARY_NAMES = (
-    "effective_clusters_final",
-    "opinion_entropy_final",
+    "mean_pairwise_distance_final",
+    "mean_pairwise_sq_distance_final",
     "mean_opinion_shift",
     "late_opinion_variance",
     "abs_variance_change",
@@ -52,7 +52,6 @@ SUMMARY_TRANSFORMS = ("log1p", "log1p", "log1p", "log1p", "log1p", "identity")
 DEFAULT_N_AGENTS = 150
 DEFAULT_EVENTS_PER_AGENT_PER_INTERVAL = 1.0
 N_WAVES = 5
-N_BINS = 20
 MOVE_THRESHOLD = 0.15
 
 # Fixed canonical (epsilon, mu) pairs for the DW N-stability study.
@@ -90,23 +89,22 @@ def events_per_interval_count(
     return max(1, int(round(n_agents * rate)))
 
 
-def _bin_proportions(opinions: np.ndarray) -> np.ndarray:
-    counts, _ = np.histogram(opinions, bins=N_BINS, range=(0.0, 1.0))
-    total = counts.sum()
-    if total == 0:
-        return np.full(N_BINS, 1.0 / N_BINS)
-    return counts.astype(np.float64) / total
-
-
-def _effective_clusters(proportions: np.ndarray) -> float:
-    return float(1.0 / np.sum(proportions**2))
-
-
-def _opinion_entropy(proportions: np.ndarray) -> float:
-    positive = proportions[proportions > 0]
-    if positive.size == 0:
+def _mean_pairwise_distance(opinions: np.ndarray) -> float:
+    """U-statistic for mean |x_i - x_j|; stable across agent counts."""
+    n_agents = opinions.shape[0]
+    if n_agents < 2:
         return 0.0
-    return float(-np.sum(positive * np.log(positive)))
+    diffs = np.abs(opinions[:, None] - opinions[None, :])
+    return float(diffs.sum() / (n_agents * (n_agents - 1)))
+
+
+def _mean_pairwise_sq_distance(opinions: np.ndarray) -> float:
+    """U-statistic for mean (x_i - x_j)^2; complements the L1 dispersion."""
+    n_agents = opinions.shape[0]
+    if n_agents < 2:
+        return 0.0
+    diffs = (opinions[:, None] - opinions[None, :]) ** 2
+    return float(diffs.sum() / (n_agents * (n_agents - 1)))
 
 
 def _run_interactions(
@@ -159,15 +157,14 @@ def _large_move_fraction(prev_opinions: np.ndarray, next_opinions: np.ndarray) -
 
 def _summaries_from_waves(waves: list[np.ndarray]) -> np.ndarray:
     w0, wf = waves[0], waves[-1]
-    proportions_final = _bin_proportions(wf)
     variances = np.array([float(w.var()) for w in waves], dtype=np.float64)
     move_fractions = [
         _large_move_fraction(waves[i], waves[i + 1]) for i in range(len(waves) - 1)
     ]
     return np.array(
         [
-            _effective_clusters(proportions_final),
-            _opinion_entropy(proportions_final),
+            _mean_pairwise_distance(wf),
+            _mean_pairwise_sq_distance(wf),
             float(np.mean(np.abs(wf - w0))),
             float(variances[-1]),
             float(abs(variances[-1] - variances[0])),
