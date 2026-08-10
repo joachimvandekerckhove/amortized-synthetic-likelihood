@@ -15,6 +15,7 @@ Configuration:
 
 import json
 import sys
+from datetime import datetime, timezone
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
@@ -414,24 +415,14 @@ def validate_cov_training_data(
     model: Model,
     *,
     seed: int = SEED_DEFAULT,
+    data_path: Path | None = None,
+    write_reports: bool = True,
 ) -> list[str]:
     """Run post-generation QA gates on covariance training data."""
     min_var, n_perm, subsample, quantile, neighbors = resolve_cov_qa_settings()
     check_summary_variance_gate(y_raw, model, min_var=min_var)
-    if parameter_mi_gate_enabled():
-        check_parameter_mi_gate(
-            y_raw,
-            X,
-            model,
-            n_perm=n_perm,
-            subsample=subsample,
-            quantile=quantile,
-            neighbors=neighbors,
-            seed=seed,
-        )
-    else:
-        print("[cov_data] Parameter MI gate disabled.")
-    return warn_summary_mi_diagnostic(
+
+    param_report = report_parameter_mi_gate(
         y_raw,
         X,
         model,
@@ -441,6 +432,44 @@ def validate_cov_training_data(
         neighbors=neighbors,
         seed=seed,
     )
+    summary_report = report_summary_mi_diagnostic(
+        y_raw,
+        X,
+        model,
+        n_perm=n_perm,
+        subsample=subsample,
+        quantile=quantile,
+        neighbors=neighbors,
+        seed=seed,
+    )
+
+    if parameter_mi_gate_enabled():
+        if not param_report["gate_passes"]:
+            msg = "Parameter MI gate failed for: " + "; ".join(param_report["failures"])
+            print(f"[cov_data] FAIL: {msg}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print("[cov_data] Parameter MI gate disabled.")
+
+    warnings = summary_report["failures"]
+    for item in warnings:
+        print(f"[cov_data] WARN: summary MI diagnostic: {item}")
+
+    if write_reports:
+        resolved_data_path = data_path or cov_train_path(model.slug)
+        param_path, summary_path = save_cov_mi_reports(
+            model.slug,
+            param_report,
+            summary_report,
+            data_path=resolved_data_path,
+            y_raw=y_raw,
+            model=model,
+            min_var=min_var,
+        )
+        print(f"[cov_data] Wrote parameter MI report: {param_path}")
+        print(f"[cov_data] Wrote summary MI report: {summary_path}")
+
+    return warnings
 
 
 def c1_column_names(n_summaries: int) -> list[str]:
@@ -477,6 +506,21 @@ def logspace_to_raw(z_mean: np.ndarray, rt_mask: np.ndarray) -> np.ndarray:
     return y_raw
 
 
+def cov_train_path(slug: str) -> Path:
+    """Path to replicate-based covariance training data."""
+    return Path("data") / slug / "cov_train.csv"
+
+
+def parameter_mi_report_path(slug: str) -> Path:
+    """Path to the hard joint parameter MI gate report."""
+    return Path("results") / slug / "parameter_mi_report.json"
+
+
+def summary_mi_report_path(slug: str) -> Path:
+    """Path to the per-summary MI diagnostic report."""
+    return Path("results") / slug / "summary_mi.json"
+
+
 def generation_summary_path(slug: str) -> Path:
     """Path to metadata describing training-data generation statistics."""
     return Path("data") / slug / "generation_summary.json"
@@ -488,6 +532,77 @@ def save_generation_summary(slug: str, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(payload, f, indent=2)
+
+
+def save_parameter_mi_report(
+    slug: str,
+    report: dict,
+    *,
+    data_path: Path,
+) -> Path:
+    """Persist the joint parameter MI gate report."""
+    path = parameter_mi_report_path(slug)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        **report,
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "data_path": str(data_path.resolve()),
+        "estimator": "ksg_joint_mi",
+        "statistic": "I(theta_j; S) for full summary vector S",
+    }
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    return path
+
+
+def save_summary_mi_report(
+    slug: str,
+    report: dict,
+    *,
+    data_path: Path,
+    y_raw: np.ndarray,
+    model: Model,
+    min_var: float,
+) -> Path:
+    """Persist the per-summary MI diagnostic report."""
+    path = summary_mi_report_path(slug)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        **report,
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "data_path": str(data_path.resolve()),
+        "variance_gate": {
+            name: float(np.var(y_raw[:, j]))
+            for j, name in enumerate(model.summary_names)
+        },
+        "min_summary_variance": min_var,
+    }
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    return path
+
+
+def save_cov_mi_reports(
+    slug: str,
+    param_report: dict,
+    summary_report: dict,
+    *,
+    data_path: Path,
+    y_raw: np.ndarray,
+    model: Model,
+    min_var: float,
+) -> tuple[Path, Path]:
+    """Write both MI QA reports for a cov_train.csv evaluation."""
+    param_path = save_parameter_mi_report(slug, param_report, data_path=data_path)
+    summary_path = save_summary_mi_report(
+        slug,
+        summary_report,
+        data_path=data_path,
+        y_raw=y_raw,
+        model=model,
+        min_var=min_var,
+    )
+    return param_path, summary_path
 
 
 def _simulate_one_theta(args: tuple) -> tuple[np.ndarray | None, bool]:
@@ -532,7 +647,7 @@ def generate_cov_dataset(model: Model) -> None:
 
     output_dir = Path("data") / slug
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "cov_train.csv"
+    output_path = cov_train_path(slug)
 
     print(f"[cov_data] Model: {slug}")
     print(
@@ -589,7 +704,13 @@ def generate_cov_dataset(model: Model) -> None:
         [logspace_to_raw(row, rt_mask) for row in z_mean_qa], dtype=np.float64
     )
     print("[cov_data] Running training-data QA gates ...")
-    summary_mi_warnings = validate_cov_training_data(X_qa, y_raw_qa, model, seed=seed)
+    summary_mi_warnings = validate_cov_training_data(
+        X_qa,
+        y_raw_qa,
+        model,
+        seed=seed,
+        data_path=output_path,
+    )
     print("[cov_data] Training-data QA gates passed.")
 
     save_generation_summary(
@@ -610,7 +731,7 @@ def load_cov_dataset(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Model]:
     """Load cov_train.csv and return arrays for training."""
     slug = model.slug
-    data_path = Path("data") / slug / "cov_train.csv"
+    data_path = cov_train_path(slug)
     if not data_path.exists():
         raise FileNotFoundError(f"Covariance training data not found: {data_path}")
 
@@ -639,6 +760,10 @@ def load_cov_dataset(
     C1_z = df[c1_cols].values.astype(np.float32)
     y_raw = np.array([logspace_to_raw(row, rt_mask) for row in z_mean], dtype=np.float32)
     validate_cov_training_data(
-        X.astype(np.float64), y_raw.astype(np.float64), model, seed=seed
+        X.astype(np.float64),
+        y_raw.astype(np.float64),
+        model,
+        seed=seed,
+        data_path=data_path,
     )
     return X, z_mean, C1_z, y_raw, model

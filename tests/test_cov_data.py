@@ -18,20 +18,23 @@ from asl.cov_data import (
     check_parameter_mi_gate,
     check_summary_variance_gate,
     cov_settings_path,
+    cov_train_path,
     draw_parameters,
     expected_columns,
     load_cov_settings,
     logspace_to_raw,
     parameter_mi_gate_enabled,
+    parameter_mi_report_path,
     report_parameter_mi_gate,
     report_summary_mi_diagnostic,
     resolve_cov_settings,
     save_cov_settings,
     summaries_to_logspace,
+    summary_mi_report_path,
     validate_cov_training_data,
     z_mean_column_names,
 )
-from asl.data import summary_column_masks
+from asl.data import TargetTransform, summary_column_masks
 
 
 class TestColumnNames:
@@ -85,6 +88,20 @@ class TestLogspaceTransforms:
         assert z[1] == np.log1p(raw[1])
         restored = logspace_to_raw(z, rt_mask)
         np.testing.assert_allclose(restored, raw, rtol=1e-6)
+
+    def test_target_transform_matches_cov_train_logspace(self, toy_model):
+        """cov_train z_mean and TargetTransform(raw) must use the same log1p mask."""
+        rt_mask, _ = summary_column_masks(toy_model)
+        transform = TargetTransform.from_model(toy_model)
+        raw = np.array([[0.55, 0.42, 0.03]], dtype=np.float64)
+        z = summaries_to_logspace(raw[0], rt_mask).reshape(1, -1)
+        transform.scaler.fit(z)
+        np.testing.assert_allclose(
+            transform.scaler.transform(z)[0],
+            transform.transform(raw)[0],
+            rtol=1e-6,
+            atol=1e-6,
+        )
 
 
 class TestCovSettingsIO:
@@ -256,3 +273,46 @@ class TestCovTrainingQA:
         )
         assert report["parameters"][0]["passes"]
         assert report["parameters"][0]["mi_joint"] > report["parameters"][0]["threshold"]
+
+    def test_validate_cov_training_data_writes_mi_reports(
+        self, toy_model, config_file, tmp_path, monkeypatch
+    ):
+        config_file(
+            "[cov_data]\n"
+            "summary_mi_permutations = 8\n"
+            "summary_mi_subsample = 200\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        rng = np.random.default_rng(4)
+        n = 400
+        X = np.column_stack(
+            [rng.uniform(lo, hi, n) for lo, hi in toy_model.param_bounds]
+        )
+        y_raw = np.column_stack(
+            [
+                np.clip(0.5 + 0.1 * X[:, 0], 0.01, 0.99),
+                0.3 + 0.05 * X[:, 1] + 0.01 * rng.standard_normal(n),
+                0.01 + 0.001 * np.abs(X[:, 0]) + 0.001 * rng.standard_normal(n),
+            ]
+        )
+        data_path = cov_train_path("toy")
+        data_path.parent.mkdir(parents=True, exist_ok=True)
+        data_path.touch()
+
+        validate_cov_training_data(X, y_raw, toy_model, data_path=data_path)
+
+        param_path = parameter_mi_report_path("toy")
+        summary_path = summary_mi_report_path("toy")
+        assert param_path.exists()
+        assert summary_path.exists()
+        with open(param_path) as f:
+            param_payload = json.load(f)
+        with open(summary_path) as f:
+            summary_payload = json.load(f)
+        assert param_payload["model"] == "toy"
+        assert param_payload["gate_passes"]
+        assert param_payload["data_path"] == str(data_path.resolve())
+        assert param_payload["estimator"] == "ksg_joint_mi"
+        assert summary_payload["model"] == "toy"
+        assert len(summary_payload["summaries"]) == toy_model.n_summaries
+        assert "variance_gate" in summary_payload
