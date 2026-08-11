@@ -1,0 +1,5 @@
+# DDM3 pipeline overrides.
+# Pin cov_data seed so regenerate-data matches cov_settings.json.
+
+[cov_data]
+random_seed = 1

@@ -1,8 +1,9 @@
 MODEL := ddmcollapsesig
 ROOT := $(shell cd ../.. && pwd)
+CONFIG := $(ROOT)/configs/ddmcollapsesig.toml
 PY := $(ROOT)/.venv/bin/python
 RUN := $(ROOT)/scripts/$(MODEL)/run.py
-ENV := cd $(ROOT) &&
+ENV := cd $(ROOT) && export ASL_CONFIG=$(CONFIG) &&
 
 DATA        := $(ROOT)/data/$(MODEL)/cov_train.csv
 TRANSFORM   := $(ROOT)/results/$(MODEL)/target_transform.pkl

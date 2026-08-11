@@ -7,6 +7,7 @@ events_per_agent_per_interval = 1.0
 [cov_data]
 replicates_per_parameter = 1000
 trials_per_replicate = 150
+random_seed = 1
 
 [training]
 architecture = "DeepWide_32x6"
