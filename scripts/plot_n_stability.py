@@ -138,7 +138,7 @@ def panel_diagonal_ratios(
     ax.axhline(1.0, **IDENTITY_LINE_KW)
     ax.set_xticks(xs)
     ax.set_xticklabels(tick_labels(keys, summary["null_key"]))
-    ax.set_ylabel(r"Mean diagonal $C_1$ ratio")
+    ax.set_ylabel(r"$C_1$ ratio")
     ax.set_title("Variance ratios")
 
 
@@ -180,10 +180,12 @@ def plot_n_stability(summary_path: Path, figure_path: Path) -> None:
     xs = x_positions(keys, summary["null_key"])
     plt.style.use(MPLSTYLE_PATH)
     fig, axes = plt.subplots(
-        1, 2, figsize=column_figsize(2, 1, aspect=0.82), sharex=True
+        1, 2, figsize=column_figsize(2, 1, aspect=1.0), sharex=True
     )
     panel_diagonal_ratios(axes[0], summary, keys, xs)
     panel_stein(axes[1], summary, keys, xs)
+    for ax in axes:
+        ax.set_box_aspect(1)
     fig.subplots_adjust(wspace=PANEL_WSPACE)
     figure_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(figure_path, bbox_inches="tight", pad_inches=0.02)
