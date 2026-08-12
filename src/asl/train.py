@@ -64,13 +64,18 @@ def build_C1_std_array(
     return np.stack(rows, axis=0).astype(np.float32)
 
 
-def split_train_val(n_rows: int, val_fraction: float = VAL_FRACTION) -> tuple[int, int]:
-    """Deterministic row split: first (1-f) rows train, remainder validation."""
+def split_train_val(
+    n_rows: int,
+    val_fraction: float = VAL_FRACTION,
+    seed: int = SEED_DEFAULT,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return disjoint train and validation row indices (seeded shuffle split)."""
     n_val = max(1, int(round(n_rows * val_fraction)))
     n_train = n_rows - n_val
     if n_train < 1:
         raise ValueError(f"Need at least 2 rows for train/val split, got {n_rows}")
-    return n_train, n_val
+    perm = np.random.default_rng(seed).permutation(n_rows)
+    return perm[:n_train], perm[n_train:]
 
 
 def train_one_epoch(
@@ -229,16 +234,17 @@ def train_emulator(model: Model) -> None:
     print(f"[train] Covariance loss weight: {cov_lambda}")
 
     X, z_mean, C1_z, y_raw, _ = load_cov_dataset(model, seed=seed)
-    n_train, _ = split_train_val(len(X))
+    train_idx, val_idx = split_train_val(len(X), seed=seed)
+    n_train = len(train_idx)
     print(
-        f"[train] Loaded {X.shape[0]} rows ({n_train} train, {len(X) - n_train} val), "
+        f"[train] Loaded {X.shape[0]} rows ({n_train} train, {len(val_idx)} val), "
         f"{X.shape[1]} params, {z_mean.shape[1]} summaries"
     )
 
-    X_train, X_val = X[:n_train], X[n_train:]
-    z_mean_train, z_mean_val = z_mean[:n_train], z_mean[n_train:]
-    C1_z_train, C1_z_val = C1_z[:n_train], C1_z[n_train:]
-    y_raw_train, y_raw_val = y_raw[:n_train], y_raw[n_train:]
+    X_train, X_val = X[train_idx], X[val_idx]
+    z_mean_train, z_mean_val = z_mean[train_idx], z_mean[val_idx]
+    C1_z_train, C1_z_val = C1_z[train_idx], C1_z[val_idx]
+    y_raw_train, y_raw_val = y_raw[train_idx], y_raw[val_idx]
 
     build_fn = build_architecture(arch_name, model.n_params, model.n_summaries)
     results_dir = Path("results") / slug

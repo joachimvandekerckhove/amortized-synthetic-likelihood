@@ -15,6 +15,7 @@ from asl.train import (
     build_target_transform,
     evaluate_cov_stein,
     evaluate_mean_r2,
+    split_train_val,
 )
 
 
@@ -31,6 +32,22 @@ class TestDualHeadNet:
         base = build_architecture("DeepWide_24x4", in_dim=2, out_dim=99)()
         net = DualHeadNet(base, n_summaries=3)
         assert net.count_trainable_parameters() > 0
+
+
+class TestSplitTrainVal:
+    def test_disjoint_reproducible_partition(self):
+        train_a, val_a = split_train_val(100, seed=1)
+        train_b, val_b = split_train_val(100, seed=1)
+        assert np.array_equal(train_a, train_b)
+        assert np.array_equal(val_a, val_b)
+        assert len(train_a) == 80
+        assert len(val_a) == 20
+        assert len(np.intersect1d(train_a, val_a)) == 0
+        assert len(np.union1d(train_a, val_a)) == 100
+
+    def test_not_csv_row_prefix(self):
+        _, val_idx = split_train_val(20, seed=42)
+        assert not np.array_equal(val_idx, np.arange(4, 20))
 
 
 class TestBuildHelpers:
