@@ -12,7 +12,7 @@ For human-readable setup and reproduction, see the repository root
 
 | File | Use when |
 |---|---|
-| [`REPRODUCE.md`](REPRODUCE.md) | Re-running an **existing** model (`ddm3`, `ddm4`, `ddmcollapsesig`, `dw`) on a fresh machine and confirming automated gates pass |
+| [`REPRODUCE.md`](REPRODUCE.md) | Re-running an **existing** model (`ddm3`, `ddm4`, `ddm4a`, `ddmcollapsesig`, `dw`) on a fresh machine and confirming automated gates pass |
 | [`EXTEND.md`](EXTEND.md) | **Adding a new model** — install the repo, implement the simulator and pipeline, run the full train/wire/recovery workflow |
 
 `EXTEND.md` is written as an LLM skill: it instructs the agent to install the
@@ -23,7 +23,7 @@ repository conventions, and treat pipeline gates as hard success criteria.
 
 | Placeholder | File | Meaning |
 |---|---|---|
-| `MODEL` | `REPRODUCE.md` | One of `ddm3`, `ddm4`, `ddmcollapsesig`, `dw` |
+| `MODEL` | `REPRODUCE.md` | One of `ddm3`, `ddm4`, `ddm4a`, `ddmcollapsesig`, `dw` |
 | `SLUG` | `EXTEND.md` | Short identifier for a new model (lowercase, no spaces) |
 
 ## Expected agent behavior

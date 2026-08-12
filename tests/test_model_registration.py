@@ -10,7 +10,7 @@ from models.catalog import get_model
 
 
 def test_all_catalog_models_have_valid_registration():
-    for slug in ("ddm3", "ddm4", "ddmcollapsesig", "dw"):
+    for slug in ("ddm3", "ddm4", "ddm4a", "ddmcollapsesig", "dw"):
         model = get_model(slug)
         assert len(model.prior_bounds) == model.n_params
         assert len(model.summary_transforms) == model.n_summaries

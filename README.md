@@ -1,12 +1,14 @@
 # Amortized synthetic likelihood — Reproduction Guide
 
 Reproducibility package for the paper *Amortized synthetic likelihoods in
-Bayesian graphical models*. Four models are covered:
+Bayesian graphical models*. Four core models are covered, plus an optional
+`ddm4a` extension:
 
 | Model | Parameters | Summaries | Architecture | Epochs |
 |---|---|---|---|---|
 | `ddm3` | v, a, t0 | acc, rt\_mean, rt\_var | DeepWide\_24x4 | 25,000 |
 | `ddm4` | v, a, t0, w | rt\_mean/var (corr + err), err\_rate | DeepWide\_32x6 | 25,000 |
+| `ddm4a` | v, a, t0, w | DDM4 summaries + pooled rt\_q10 | DeepWide\_32x6 | 50,000 |
 | `ddmcollapsesig` | a0, v, k, t0 | acc, rt\_q10, var\_t1, var\_t3\_minus\_t1 | DeepWide\_32x6 | 25,000 |
 | `dw` | epsilon, mu | 6 opinion-dynamics summaries | DeepWide\_32x6 | 20,000 |
 
@@ -127,12 +129,14 @@ All commands run from the **repo root**.
 make preflight         # run pytest (recommended before any pipeline)
 make ddm3              # full pipeline for 3-parameter DDM
 make ddm4              # full pipeline for 4-parameter DDM
+make ddm4a             # optional: DDM4 + pooled RT q10 summary
 make ddmcollapsesig    # full pipeline for collapsing-bounds DDM
 make dw                # full pipeline for Deffuant-Weisbuch (DW) opinion dynamics
-make all               # all four models
+make all               # four core models (excludes ddm4a)
 ```
 
-Training data is committed for all four models (`data/<model>/cov_train.csv`).
+Training data is committed for the core models and for `ddm4a`
+(`data/<model>/cov_train.csv`).
 To force regeneration: `make -C scripts/<model> regenerate-data` (or
 `make -C scripts/<model> reproduce` for the full pipeline from scratch).
 
@@ -192,6 +196,27 @@ Expected recovery:
 | a | 0.986 | 0.958 |
 | t0 | 0.912 | 0.962 |
 | w | 0.974 | 0.976 |
+
+### 4.2a `ddm4a` (optional)
+
+`ddm4a` reuses the DDM4 parameters and architecture, and adds a pooled RT
+10th-percentile summary (`rt_q10`) aimed at improving nondecision-time
+recovery. It is enrolled via `make ddm4a` but is not part of `make all`.
+Training uses 50,000 epochs with `mean_r2_threshold = 0.998`
+(`configs/ddm4a.toml`).
+
+```bash
+make ddm4a
+```
+
+Expected recovery (N=500 trials/subject):
+
+| Parameter | Correlation | 95% CI coverage |
+|---|---|---|
+| v | 0.995 | 0.964 |
+| a | 0.988 | 0.968 |
+| t0 | 0.967 | 0.976 |
+| w | 0.974 | 0.982 |
 
 ### 4.3 `ddmcollapsesig`
 

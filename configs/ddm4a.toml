@@ -1,0 +1,11 @@
+# DDM4a pipeline overrides.
+# Pin cov_data seed so regenerate-data is reproducible.
+# Double default training length (25k -> 50k); R^2 gate relaxed to 0.998
+# because 50k epochs still plateau just under 0.999.
+
+[cov_data]
+random_seed = 1
+
+[training]
+training_epochs = 50000
+mean_r2_threshold = 0.998

@@ -1,0 +1,92 @@
+"""
+models.ddm.ddm4a -- Four-parameter DDM with an added pooled RT q10 summary.
+
+Parameters: drift rate (v), boundary separation (a), nondecision time (t0),
+starting-point bias (w).
+Summaries: DDM4 summaries plus the 10th percentile of pooled RT.
+"""
+
+import numpy as np
+
+from asl.cholesky import build_sl_likelihood_line, emulator_output_names_for
+from asl.spec import Model
+from models.ddm.bounds import (
+    DDM4_PRIOR_BOUNDS,
+    DDM4_RECOVERY_PRIORS,
+    DDM4_TRAINING_BOUNDS,
+)
+from models.ddm.simulator import simulate_ddm_paths_biased
+
+PARAM_NAMES = ("v", "a", "t0", "w")
+PARAM_BOUNDS = DDM4_TRAINING_BOUNDS
+PRIOR_BOUNDS = DDM4_PRIOR_BOUNDS
+SUMMARY_NAMES = (
+    "rt_mean_corr",
+    "rt_var_corr",
+    "rt_mean_err",
+    "rt_var_err",
+    "err_rate",
+    "rt_q10",
+)
+SUMMARY_TRANSFORMS = ("log1p", "log1p", "log1p", "log1p", "identity", "log1p")
+N_SUMMARIES = len(SUMMARY_NAMES)
+
+RECOVERY_PRIORS = DDM4_RECOVERY_PRIORS
+
+
+def simulate_summaries(params: np.ndarray, n_trials: int, seed: int) -> np.ndarray:
+    """Simulate summary statistics for DDM4a (DDM4 summaries plus RT q10)."""
+    v, a, t0, w = (
+        float(params[0]),
+        float(params[1]),
+        float(params[2]),
+        float(params[3]),
+    )
+
+    reaction_times, choices = simulate_ddm_paths_biased(
+        drift_rate=v,
+        boundary_separation=a,
+        nondecision_time=t0,
+        starting_bias=w,
+        n_samples=n_trials,
+        seed=seed,
+    )
+
+    rts_correct = reaction_times[choices == 1]
+    rts_error = reaction_times[choices == 0]
+    n_total = len(reaction_times)
+
+    if len(rts_correct) < 2 or len(rts_error) < 2:
+        return np.full(N_SUMMARIES, np.nan, dtype=np.float64)
+
+    rt_mean_corr = float(np.mean(rts_correct))
+    rt_var_corr = float(np.var(rts_correct, ddof=1))
+    rt_mean_err = float(np.mean(rts_error))
+    rt_var_err = float(np.var(rts_error, ddof=1))
+    err_rate = float(len(rts_error) / n_total)
+    rt_q10 = float(np.percentile(reaction_times, 10))
+
+    return np.array(
+        [rt_mean_corr, rt_var_corr, rt_mean_err, rt_var_err, err_rate, rt_q10],
+        dtype=np.float64,
+    )
+
+
+def build_jags_likelihood(obs: dict) -> list[str]:
+    del obs
+    return build_sl_likelihood_line("ddm4a", PARAM_NAMES, N_SUMMARIES)
+
+
+DDM4A = Model(
+    slug="ddm4a",
+    param_names=PARAM_NAMES,
+    param_bounds=PARAM_BOUNDS,
+    prior_bounds=PRIOR_BOUNDS,
+    summary_names=SUMMARY_NAMES,
+    summary_transforms=SUMMARY_TRANSFORMS,
+    emulator_output_names=emulator_output_names_for(N_SUMMARIES, SUMMARY_NAMES),
+    simulate_summaries=simulate_summaries,
+    recovery_priors=RECOVERY_PRIORS,
+    build_jags_likelihood=build_jags_likelihood,
+    default_architecture="DeepWide_32x6",
+)

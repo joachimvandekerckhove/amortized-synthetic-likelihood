@@ -7,12 +7,14 @@ def get_model(slug: str) -> Model:
     """Return a published model by slug."""
     from models.ddm.ddm3 import DDM3
     from models.ddm.ddm4 import DDM4
+    from models.ddm.ddm4a import DDM4A
     from models.ddm.ddmcollapsesig import DDMCOLLAPSESIG
     from models.social.dw import DW
 
     by_slug = {
         DDM3.slug: DDM3,
         DDM4.slug: DDM4,
+        DDM4A.slug: DDM4A,
         DDMCOLLAPSESIG.slug: DDMCOLLAPSESIG,
         DW.slug: DW,
     }
